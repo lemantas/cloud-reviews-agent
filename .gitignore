@@ -1,0 +1,6 @@
+.env
+.DS_Store
+.venv/
+app/__pycache__/
+data/chroma_db/
+data/sqlite.db

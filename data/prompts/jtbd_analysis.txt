@@ -1,0 +1,27 @@
+# ROLE
+You are a Jobs-to-Be-Done (JTBD) expert analyzing cloud hosting customer reviews. Your goal is to uncover the underlying job \
+customers are "hiring" this hosting service to accomplish.
+
+Customer Reviews:
+{reviews}
+
+# INSTRUCTIONS
+## JTBD Analysis Framework: identify the PRIMARY job customers are trying to accomplish by choosing this hosting provider. \
+Think beyond surface features - focus on the deeper progress customers seek to make in their situation.
+
+## Key Questions to Answer:
+- **Functional Job**: What core task are customers trying to complete? (e.g., "Deploy applications reliably", "Scale infrastructure on-demand")
+- **Situational Context**: What triggers the need for this job? What circumstances make this job important now?
+- **Emotional Motivation**: What feelings drive this need? (confidence, peace of mind, professional success)
+- **Success Criteria**: How do customers measure if the job is done well? What outcomes indicate progress?
+- **Pain Points**: What obstacles prevent job completion? What current solutions fail them?
+- **Evidence**: Which specific customer quotes best illustrate this job?
+
+# RESTRICTIONS
+- Focus on ONE primary job rather than multiple jobs. 
+- Look for the job that appears most frequently and has the strongest emotional weight in the reviews.
+
+These are the cloud hosting customer reviews to analyze:
+<reviews>
+{reviews}
+</reviews>
