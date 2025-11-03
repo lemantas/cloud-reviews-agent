@@ -39,6 +39,58 @@ Insights Agent Mode:
 - Example: "Analyze Scaleway reviews" --> Automatically runs sentiment analysis + aspect extraction + JTBD
 - All three tools validated by Pydantic models (Sentiment, AspectAnalysis, JTBD) for structured output
 
+## Agentic refactoring
+
+### 1. LLM-Based Tool Selection
+
+LLM-Based Tool Selection
+- LLM decides which tools to use
+- More accurate tool selection (no manual keyword lists)
+- Handles ambiguous queries better ("analyze Scaleway" → agent decides to run all 3 tools)
+- User doesn't need to know which tool does what
+
+Changes needed:
+  - Convert your 3 tools (summarize_sentiment, extract_top_aspects, infer_jtbd) to LangChain tool format
+  - Use ChatOpenAI.bind_tools() to let GPT-4o decide which tools to invoke
+  - Remove route_query_to_tools() function
+  - Let the agent autonomously choose 0, 1, 2, or all 3 tools based on the question
+
+### 2. Multi-Step Reasoning
+
+ReAct-style agent that can perform multi-step analysis:
+- Handles comparative questions
+- Can drill down based on findings ("I see pricing issues, let me get more pricing reviews")
+- More natural conversation flow
+
+Changes needed:
+- Use LangChain's create_react_agent() or AgentExecutor
+- Add a "retrieve_reviews" tool that the agent can call dynamically
+- Agent decides: retrieve → analyze → retrieve again → synthesize
+
+Example flow:
+  1. User asks: "Compare pricing sentiment between OVH and Scaleway"
+  2. Agent thinks: "I need sentiment analysis for each vendor"
+  3. Agent retrieves OVH reviews → runs sentiment tool
+  4. Agent retrieves Scaleway reviews → runs sentiment tool
+  5. Agent synthesizes comparison
+
+
+### 3. Follow-Up Capabilities
+
+Let the agent ask clarifying questions or suggest follow-ups:
+- Makes the agent feel interactive and helpful
+- Guides non-technical users
+- Natural conversation flow
+
+Example:
+- User: "Tell me about customer issues"
+- Agent: "I found 3 main issue categories. Would you like me to analyze sentiment for each category
+separately?"
+
+Changes needed:
+  - Modify agent prompt to include follow-up question generation
+  - Add session memory (store conversation history in st.session_state)
+  - Display suggested follow-up questions as clickable buttons
 
 ## Technical Implementation
 

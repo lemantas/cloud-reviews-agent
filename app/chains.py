@@ -1,5 +1,5 @@
 from retrieval import retrieve_documents, format_snippets_to_text
-from prompts import get_rag_prompt, get_agent_prompt
+from prompts import get_rag_prompt, get_agent_prompt, get_tool_selection_prompt
 from clients import get_llm, get_vector_store
 from tools import summarize_sentiment, extract_top_aspects, infer_jtbd
 import json
@@ -39,36 +39,8 @@ def simple_rag_response(question, chunk_type="sentence", vendor=None, top_k=None
             "snippets": []
         }
 
-def route_query_to_tools(question):
-    """Route user query to appropriate analysis tools based on keywords."""
-    question_lower = question.lower()
-
-    # Keyword-based routing
-    tools_to_use = []
-
-    # Sentiment-related keywords
-    sentiment_keywords = ["sentiment", "feel", "opinion", "positive", "negative", "happy", "unhappy", "satisfied", "disappointed"]
-    if any(keyword in question_lower for keyword in sentiment_keywords):
-        tools_to_use.append("sentiment")
-
-    # Aspect-related keywords
-    aspect_keywords = ["feature", "theme", "aspect", "topic", "discuss", "mention", "talk about", "performance", "pricing", "support", "reliability"]
-    if any(keyword in question_lower for keyword in aspect_keywords):
-        tools_to_use.append("aspects")
-
-    # JTBD-related keywords
-    jtbd_keywords = ["job", "accomplish", "goal", "task", "trying to", "need to", "want to", "use for", "purpose", "choose"]
-    if any(keyword in question_lower for keyword in jtbd_keywords):
-        tools_to_use.append("jtbd")
-
-    # If no specific keywords found, use all tools for comprehensive analysis
-    if not tools_to_use:
-        tools_to_use = ["sentiment", "aspects", "jtbd"]
-
-    return tools_to_use
-
 def agentic_response(question, chunk_type="sentence", vendor=None, top_k=None, fetch_k=None):
-    """Simple RAG with smart tool routing based on query analysis."""
+    """Agentic RAG with LLM-driven tool selection for intelligent analysis."""
     try:
         # Step 1: Retrieve documents
         snippets = retrieve_documents(question, chunk_type, vendor, top_k, fetch_k)
@@ -80,23 +52,40 @@ def agentic_response(question, chunk_type="sentence", vendor=None, top_k=None, f
                 "snippets": []
             }
 
-        # Step 2: Route query to appropriate tools
-        tools_to_use = route_query_to_tools(question)
-
-        # Step 3: Run selected tools
+        # Step 2: Prepare tools for LLM
+        tools = [summarize_sentiment, extract_top_aspects, infer_jtbd]
         tools_data = json.dumps(snippets)
+
+        # Step 3: Let LLM decide which tools to use
+        llm = get_llm()
+        llm_with_tools = llm.bind_tools(tools)
+
+        # Build tool selection messages via prompts
+        tool_select_prompt = get_tool_selection_prompt()
+        messages = tool_select_prompt.format_messages(question=question)
+
+        # Invoke LLM with tools
+        ai_msg = llm_with_tools.invoke(messages)
+
+        # Step 4: Execute selected tools
         tool_outputs = {}
 
-        if "sentiment" in tools_to_use:
-            tool_outputs["sentiment_analysis"] = summarize_sentiment.invoke({"snippets_data": tools_data, "question": question})
+        if ai_msg.tool_calls:
+            for tool_call in ai_msg.tool_calls:
+                tool_name = tool_call["name"]
 
-        if "aspects" in tools_to_use:
-            tool_outputs["aspect_extraction"] = extract_top_aspects.invoke({"snippets_data": tools_data, "question": question})
+                # Execute the selected tool
+                if tool_name == "summarize_sentiment":
+                    result = summarize_sentiment.invoke({"snippets_data": tools_data, "question": question})
+                    tool_outputs["sentiment_analysis"] = result
+                elif tool_name == "extract_top_aspects":
+                    result = extract_top_aspects.invoke({"snippets_data": tools_data, "question": question})
+                    tool_outputs["aspect_extraction"] = result
+                elif tool_name == "infer_jtbd":
+                    result = infer_jtbd.invoke({"snippets_data": tools_data, "question": question})
+                    tool_outputs["jtbd_analysis"] = result
 
-        if "jtbd" in tools_to_use:
-            tool_outputs["jtbd_analysis"] = infer_jtbd.invoke({"snippets_data": tools_data, "question": question})
-
-        # Step 4: Create enriched context
+        # Step 5: Create enriched context
         context_snippets = format_snippets_to_text(snippets)
 
         # Add tool analysis to context
@@ -104,14 +93,12 @@ def agentic_response(question, chunk_type="sentence", vendor=None, top_k=None, f
         if tool_outputs:
             tool_context = "\n\n## Analysis Results:\n"
             for tool_name, output in tool_outputs.items():
-                tool_context += f"\n### {tool_name.replace('_', ' ').title()}:\n{output}\n"
+                tool_context += f"\n### {tool_name.replace('_', ' ').title()}:\n{json.dumps(output, indent=2)}\n"
 
         full_context = context_snippets + tool_context
 
-        # Step 5: Generate response with enriched context
+        # Step 6: Generate final response with enriched context
         prompt = get_agent_prompt()
-        llm = get_llm()
-
         formatted_prompt = prompt.format(context=full_context, question=question)
         response = llm.invoke(formatted_prompt)
 
