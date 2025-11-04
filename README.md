@@ -34,7 +34,7 @@ Simple Q&A Mode:
 - No additional tool analysis
 
 Insights Agent Mode:
-- Keyword-based routing to analysis tools
+- LLM-based routing to analysis tools
 - Provides deeper, structured insights with JSON output
 - Example: "Analyze Scaleway reviews" --> Automatically runs sentiment analysis + aspect extraction + JTBD
 - All three tools validated by Pydantic models (Sentiment, AspectAnalysis, JTBD) for structured output

@@ -2,10 +2,12 @@ from langchain.tools import tool
 from clients import get_llm
 from prompts import get_jtbd_prompt, get_aspects_prompt, get_sentiment_prompt
 from models import JTBD, AspectAnalysis, Sentiment
+from retrieval import retrieve_documents
 import json
 
+
 @tool
-def summarize_sentiment(snippets_data: str, question: str) -> dict:
+def summarize_sentiment(snippets: list[dict], question: str) -> dict:
     """Analyze overall sentiment and emotional tone of customer reviews.
 
     Use this tool when the user asks about:
@@ -18,9 +20,6 @@ def summarize_sentiment(snippets_data: str, question: str) -> dict:
     Returns: Dictionary with mean_rating, positive_share, negative_share, and key themes.
     """
     try:
-        snippets_list = json.loads(snippets_data)
-        snippets = [{'text': s.get('text'), 'rating': s.get('rating')} for s in snippets_list if s.get('text')]
-
         if not snippets:
             return {"error": "No review data available for sentiment analysis."}
 
@@ -49,7 +48,7 @@ def summarize_sentiment(snippets_data: str, question: str) -> dict:
         return {"error": f"Error analyzing sentiment: {str(e)}"}
 
 @tool
-def extract_top_aspects(snippets_data: str, question: str) -> dict:
+def extract_top_aspects(snippets: list[dict], question: str) -> dict:
     """Identify and rank specific product/service features mentioned in customer reviews.
 
     Use this tool when the user asks about:
@@ -62,9 +61,6 @@ def extract_top_aspects(snippets_data: str, question: str) -> dict:
     Returns: Dictionary with ranked aspects including frequency, sentiment scores, and example quotes.
     """
     try:
-        snippets_list = json.loads(snippets_data)
-        snippets = [{'text': s.get('text'), 'rating': s.get('rating')} for s in snippets_list if s.get('text') and s.get('rating')]
-
         if not snippets:
             return {"error": "No review data available for aspect extraction."}
 
@@ -99,7 +95,7 @@ def extract_top_aspects(snippets_data: str, question: str) -> dict:
         return {"error": f"Error extracting aspects: {str(e)}"}
 
 @tool
-def infer_jtbd(snippets_data: str, question: str) -> dict:
+def infer_jtbd(snippets: list[dict], question: str) -> dict:
     """Analyze customer goals, motivations, and Jobs-to-Be-Done from reviews.
 
     Use this tool when the user asks about:
@@ -113,9 +109,6 @@ def infer_jtbd(snippets_data: str, question: str) -> dict:
     Returns: Dictionary with job description, situation, motivation, expected outcomes, and frustrations.
     """
     try:
-        snippets_list = json.loads(snippets_data)
-        snippets = [{'text': s.get('text'), 'rating': s.get('rating')} for s in snippets_list if s.get('text')]
-
         if not snippets:
             return {"error": "No review data available for JTBD analysis."}
 
@@ -139,3 +132,27 @@ def infer_jtbd(snippets_data: str, question: str) -> dict:
 
     except Exception as e:
         return {"error": f"Error performing JTBD analysis: {str(e)}"}
+
+
+@tool
+def retrieve_reviews(question: str, chunk_type: str, vendor: str, top_k: int, fetch_k: int) -> dict:
+    """Retrieve relevant review snippets from the ChromaDB vector store to best answer the question. Always use this tool to best answer the question. Optionally, use  this tool between analyses to get more context.
+
+    Args:
+    - question: Natural-language query.
+    - chunk_type: "sentence" | "review"; use "review" for broader context
+    - vendor: Optional provider filter; set if the user names a provider (e.g., "ovh", "scaleway", "hetzner", "digital_ocean", "vultr", "cherry_servers")
+    - top_k: Optional number of results to return; set this between 10 and 30 for reviews, and between 50 and 200 for sentences, depending on the context.
+    - fetch_k: Optional candidate pool size before diversification; set this from 1.5 to 3 times top_k, depending on the context.
+    """
+    try:
+        snippets = retrieve_documents(
+            question=question,
+            chunk_type=chunk_type,
+            vendor=vendor,
+            top_k=top_k,
+            fetch_k=fetch_k,
+        )
+        return {"snippets": snippets, "count": len(snippets)}
+    except Exception as e:
+        return {"error": f"Error retrieving reviews: {str(e)}"}

@@ -1,7 +1,7 @@
 from retrieval import retrieve_documents, format_snippets_to_text
 from prompts import get_rag_prompt, get_agent_prompt, get_tool_selection_prompt
-from clients import get_llm, get_vector_store
-from tools import summarize_sentiment, extract_top_aspects, infer_jtbd
+from clients import get_llm
+from tools import summarize_sentiment, extract_top_aspects, infer_jtbd, retrieve_reviews
 import json
 
 def rag_chain(question, chunk_type="sentence", vendor=None, top_k=None, fetch_k=None):
@@ -53,36 +53,55 @@ def agentic_response(question, chunk_type="sentence", vendor=None, top_k=None, f
             }
 
         # Step 2: Prepare tools for LLM
-        tools = [summarize_sentiment, extract_top_aspects, infer_jtbd]
-        tools_data = json.dumps(snippets)
+        tools = [summarize_sentiment, extract_top_aspects, infer_jtbd, retrieve_reviews]
 
         # Step 3: Let LLM decide which tools to use
         llm = get_llm()
         llm_with_tools = llm.bind_tools(tools)
 
-        # Build tool selection messages via prompts
+        # Format prompt
         tool_select_prompt = get_tool_selection_prompt()
-        messages = tool_select_prompt.format_messages(question=question)
+        formatted_prompt = tool_select_prompt.format(question=question)
 
         # Invoke LLM with tools
-        ai_msg = llm_with_tools.invoke(messages)
+        response = llm_with_tools.invoke(formatted_prompt)
 
         # Step 4: Execute selected tools
         tool_outputs = {}
 
-        if ai_msg.tool_calls:
-            for tool_call in ai_msg.tool_calls:
+        if response.tool_calls:
+            for tool_call in response.tool_calls:
                 tool_name = tool_call["name"]
 
-                # Execute the selected tool
-                if tool_name == "summarize_sentiment":
-                    result = summarize_sentiment.invoke({"snippets_data": tools_data, "question": question})
+                if tool_name == "retrieve_reviews":
+                    # Allow LLM to provide overrides for retrieval args
+                    args = dict(tool_call.get("args", {})) if isinstance(tool_call, dict) else {}
+                    if "question" not in args:
+                        args["question"] = question
+                    if "chunk_type" not in args:
+                        args["chunk_type"] = chunk_type
+                    if "vendor" not in args:
+                        args["vendor"] = vendor
+                    if "top_k" not in args:
+                        args["top_k"] = top_k
+                    if "fetch_k" not in args:
+                        args["fetch_k"] = fetch_k
+                    result = retrieve_reviews.invoke(args)
+                    # Update working snippets if retrieval succeeded
+                    if isinstance(result, dict) and result.get("snippets"):
+                        snippets = result["snippets"]
+                    tool_outputs["retrieval"] = {
+                        "used_args": {k: v for k, v in args.items()},
+                        "count": (len(snippets) if isinstance(snippets, list) else 0)
+                    }
+                elif tool_name == "summarize_sentiment":
+                    result = summarize_sentiment.invoke({"snippets": snippets, "question": question})
                     tool_outputs["sentiment_analysis"] = result
                 elif tool_name == "extract_top_aspects":
-                    result = extract_top_aspects.invoke({"snippets_data": tools_data, "question": question})
+                    result = extract_top_aspects.invoke({"snippets": snippets, "question": question})
                     tool_outputs["aspect_extraction"] = result
                 elif tool_name == "infer_jtbd":
-                    result = infer_jtbd.invoke({"snippets_data": tools_data, "question": question})
+                    result = infer_jtbd.invoke({"snippets": snippets, "question": question})
                     tool_outputs["jtbd_analysis"] = result
 
         # Step 5: Create enriched context
