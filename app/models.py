@@ -1,7 +1,30 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Literal
 
-# Not used anywhere yet, but keeping for now
+class RetrievalInput(BaseModel):
+    """Validated inputs for the retrieval tool."""
+    question: str
+    chunk_type: Literal["sentence", "review"] = Field(
+        default="sentence",
+        description='Retrieval granularity: "sentence" for precision; "review" for broader context',
+    )
+    vendor: Optional[Literal["ovh", "scaleway", "hetzner", "digital_ocean", "vultr", "cherry_servers"]] = Field(
+        default=None,
+        description="Restrict to a known provider when specified",
+    )
+    top_k: int = Field(
+        default=12,
+        ge=10,
+        le=100,
+        description="Results to return (~10–30 for review-level; ~50–200 for sentence-level)",
+    )
+    fetch_k: int = Field(
+        default=30,
+        ge=15,
+        le=300,
+        description="Candidate pool before diversification (~1.5–3× bigger than top_k)",
+    )
+
 class Snippet(BaseModel):
     """A review snippet with metadata."""
     text: str
@@ -12,11 +35,15 @@ class Snippet(BaseModel):
     vendor: Optional[str] = None
     review_header: Optional[str] = None
 
-# Not used anywhere yet, but keeping for now
+class RetrievalResult(BaseModel):
+    """Normalized retrieval payload returned by retrieve_documents function."""
+    snippets: List[Snippet] = Field(..., description="List of review snippets to analyze")
+    count: int = Field(..., description="Total number of snippets analyzed")
+
 class ToolInput(BaseModel):
-    """Input for analysis tools."""
-    snippets: List[Snippet]
-    question: Optional[str] = None
+    """Standardized input payload for analysis tools."""
+    snippets: List[Snippet] = Field(..., description="List of review snippets to analyze")
+    question: str = Field(..., description="Question to analyze the snippets for")
 
 class Sentiment(BaseModel):
     """Sentiment analysis summary of reviews."""

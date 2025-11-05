@@ -1,14 +1,43 @@
 from langchain.tools import tool
 from clients import get_llm
 from prompts import get_jtbd_prompt, get_aspects_prompt, get_sentiment_prompt
-from models import JTBD, AspectAnalysis, Sentiment
+from models import JTBD, AspectAnalysis, Sentiment, Snippet, RetrievalResult, RetrievalInput, ToolInput
 from retrieval import retrieve_documents
 import json
 
 
-@tool
-def summarize_sentiment(snippets: list[dict], question: str) -> dict:
+def _normalize_snippets(snippets):
+    """Normalize snippet inputs to a uniform list of dicts with keys 'text' and 'rating'.
+
+    - Accepts a list of strings or dicts; ignores empty/invalid items
+    - For strings: maps to {"text": <str>, "rating": None}
+    - For dicts: preserves 'text' and 'rating' if available
+    - For Pydantic models (e.g., Snippet), uses model_dump()
+    """
+    normalized = []
+    if not isinstance(snippets, list):
+        return normalized
+    for item in snippets:
+        if hasattr(item, "model_dump") and callable(getattr(item, "model_dump")):
+            try:
+                item = item.model_dump()
+            except Exception:
+                item = {}
+        if isinstance(item, str):
+            text = item.strip()
+            if text:
+                normalized.append({"text": text, "rating": None})
+        elif isinstance(item, dict):
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                normalized.append({"text": text.strip(), "rating": item.get("rating")})
+    return normalized
+
+
+@tool("sentiment_analysis", args_schema=ToolInput)
+def summarize_sentiment(snippets: list[str | dict], question: str) -> dict:
     """Analyze overall sentiment and emotional tone of customer reviews.
+    Requires snippets from retrieve_reviews. Do not call this tool more than once unless you retrieved new snippets.
 
     Use this tool when the user asks about:
     - Overall sentiment, feelings, or opinions (e.g., "How do customers feel?")
@@ -20,6 +49,7 @@ def summarize_sentiment(snippets: list[dict], question: str) -> dict:
     Returns: Dictionary with mean_rating, positive_share, negative_share, and key themes.
     """
     try:
+        snippets = _normalize_snippets(snippets)
         if not snippets:
             return {"error": "No review data available for sentiment analysis."}
 
@@ -47,9 +77,10 @@ def summarize_sentiment(snippets: list[dict], question: str) -> dict:
     except Exception as e:
         return {"error": f"Error analyzing sentiment: {str(e)}"}
 
-@tool
-def extract_top_aspects(snippets: list[dict], question: str) -> dict:
+@tool("aspect_extraction", args_schema=ToolInput)
+def extract_top_aspects(snippets: list[str | dict], question: str) -> dict:
     """Identify and rank specific product/service features mentioned in customer reviews.
+    Requires snippets from retrieve_reviews. Do not call this tool more than once unless you retrieved new snippets.
 
     Use this tool when the user asks about:
     - Specific features or aspects (e.g., "What features do customers discuss?")
@@ -61,6 +92,7 @@ def extract_top_aspects(snippets: list[dict], question: str) -> dict:
     Returns: Dictionary with ranked aspects including frequency, sentiment scores, and example quotes.
     """
     try:
+        snippets = _normalize_snippets(snippets)
         if not snippets:
             return {"error": "No review data available for aspect extraction."}
 
@@ -94,9 +126,10 @@ def extract_top_aspects(snippets: list[dict], question: str) -> dict:
     except Exception as e:
         return {"error": f"Error extracting aspects: {str(e)}"}
 
-@tool
-def infer_jtbd(snippets: list[dict], question: str) -> dict:
+@tool("jtbd_analysis", args_schema=ToolInput)
+def infer_jtbd(snippets: list[str | dict], question: str) -> dict:
     """Analyze customer goals, motivations, and Jobs-to-Be-Done from reviews.
+    Requires snippets from retrieve_reviews. Do not call this tool more than once unless you retrieved new snippets.
 
     Use this tool when the user asks about:
     - Why customers choose the service (e.g., "What are customers trying to accomplish?")
@@ -109,6 +142,7 @@ def infer_jtbd(snippets: list[dict], question: str) -> dict:
     Returns: Dictionary with job description, situation, motivation, expected outcomes, and frustrations.
     """
     try:
+        snippets = _normalize_snippets(snippets)
         if not snippets:
             return {"error": "No review data available for JTBD analysis."}
 
@@ -134,25 +168,41 @@ def infer_jtbd(snippets: list[dict], question: str) -> dict:
         return {"error": f"Error performing JTBD analysis: {str(e)}"}
 
 
-@tool
-def retrieve_reviews(question: str, chunk_type: str, vendor: str, top_k: int, fetch_k: int) -> dict:
-    """Retrieve relevant review snippets from the ChromaDB vector store to best answer the question. Always use this tool to best answer the question. Optionally, use  this tool between analyses to get more context.
-
-    Args:
-    - question: Natural-language query.
-    - chunk_type: "sentence" | "review"; use "review" for broader context
-    - vendor: Optional provider filter; set if the user names a provider (e.g., "ovh", "scaleway", "hetzner", "digital_ocean", "vultr", "cherry_servers")
-    - top_k: Optional number of results to return; set this between 10 and 30 for reviews, and between 50 and 200 for sentences, depending on the context.
-    - fetch_k: Optional candidate pool size before diversification; set this from 1.5 to 3 times top_k, depending on the context.
+@tool("retrieve_reviews", args_schema=RetrievalInput)
+def retrieve_reviews(
+    question: str,
+    chunk_type: str = "sentence",
+    vendor: str | None = None,
+    top_k: int | None = None,
+    fetch_k: int | None = None,
+) -> dict:
+    """Retrieve relevant review snippets from the ChromaDB vector store to best answer the question. 
+    Always use this tool to best answer the question. Optionally, use it between analyses to get more context.
     """
     try:
-        snippets = retrieve_documents(
+        raw_snippets = retrieve_documents(
             question=question,
             chunk_type=chunk_type,
             vendor=vendor,
             top_k=top_k,
             fetch_k=fetch_k,
         )
-        return {"snippets": snippets, "count": len(snippets)}
+        # Normalize into Snippet models
+        snippets: list[Snippet] = []
+        for snip in raw_snippets:
+            if isinstance(snip, dict) and snip.get("text"):
+                snippets.append(Snippet(
+                    text=str(snip.get("text", "")),
+                    rating=snip.get("rating"),
+                    date=snip.get("date"),
+                    source=snip.get("source"),
+                    vendor=snip.get("vendor"),
+                    review_header=snip.get("review_header"),
+                ))
+            elif isinstance(snip, str) and snip.strip():
+                snippets.append(Snippet(text=snip.strip()))
+
+        payload = RetrievalResult(snippets=snippets, count=len(snippets))
+        return payload.model_dump()
     except Exception as e:
         return {"error": f"Error retrieving reviews: {str(e)}"}

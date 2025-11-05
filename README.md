@@ -63,7 +63,7 @@ ReAct-style agent that can perform multi-step analysis:
 - More natural conversation flow
 
 Changes needed:
-- Use LangChain's create_react_agent() or AgentExecutor
+- Use LangChain's create_agent() or AgentExecutor
 - Add a "retrieve_reviews" tool that the agent can call dynamically
 - Agent decides: retrieve → analyze → retrieve again → synthesize
 

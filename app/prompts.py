@@ -14,7 +14,6 @@ AGENT_SYSTEM_PROMPT = load_prompt('agent_system.txt')
 JTBD_ANALYSIS_PROMPT = load_prompt('jtbd_analysis.txt')
 ASPECTS_ANALYSIS_PROMPT = load_prompt('aspects_analysis.txt')
 SENTIMENT_ANALYSIS_PROMPT = load_prompt('sentiment_analysis.txt')
-TOOL_SELECTION_SYSTEM_PROMPT = load_prompt('tool_selection_system.txt')
 
 # Template constructors
 def get_rag_prompt():
@@ -24,10 +23,7 @@ def get_rag_prompt():
     ])
 
 def get_agent_prompt():
-    return ChatPromptTemplate.from_messages([
-        ("system", AGENT_SYSTEM_PROMPT),
-        ("human", "Question: {question}")
-    ])
+    return AGENT_SYSTEM_PROMPT
 
 def get_sentiment_prompt():
     return ChatPromptTemplate.from_messages([
@@ -45,10 +41,4 @@ def get_jtbd_prompt():
     return ChatPromptTemplate.from_messages([
         ("system", JTBD_ANALYSIS_PROMPT),
         ("human", "You may use this human question to help you analyze the JTBD of the reviews: {question}")
-    ])
-
-def get_tool_selection_prompt():
-    return ChatPromptTemplate.from_messages([
-        ("system", TOOL_SELECTION_SYSTEM_PROMPT),
-        ("human", "Question: {question}\n\nDecide which analysis tools to run on the customer review data.")
     ])
