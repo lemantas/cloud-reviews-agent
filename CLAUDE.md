@@ -33,7 +33,7 @@ This is an Agentic RAG (Retrieval-Augmented Generation) application for analyzin
 - **Chunking:** NLTK sentence tokenization for two-level chunking
 - **OLTP DB:** SQLite for structured review data
 - **Embeddings:** OpenAI text-embedding-3-small
-- **LLM:** GPT-4o (temperature=0.2) for agentic reasoning and structured output
+- **LLM:** GPT-4o-mini (temperature=0.2) for agentic reasoning and structured output - switched for faster responses
 - **Framework:** LangChain with Agents API (`create_agent()`) for autonomous tool selection
 - **UI:** Streamlit with session state management and real-time token tracking
 
@@ -115,29 +115,37 @@ The system implements four LangChain tools that the agent can autonomously invok
    - Returns: JTBD model with supporting quotes and total reviews analyzed
    - Input: List of snippets + user question
 
-4. **retrieve_reviews** (`@tool` decorator with RetrievalInput schema) - NEW TOOL
+4. **retrieve_reviews** (`@tool` decorator with RetrievalInput schema)
    - Dynamically retrieves relevant review snippets from ChromaDB vector store
    - Enables multi-step reasoning: agent can retrieve → analyze → retrieve again with different parameters
    - Returns: RetrievalResult model (snippets list, count)
    - Input: question, chunk_type (sentence/review), vendor filter, top_k, fetch_k
    - Features: Deduplication by review_id, metadata normalization (text, rating, date, source, vendor, review_header)
 
+**Tool Efficiency Guidelines:**
+- Each analysis tool (sentiment, aspect, JTBD) includes docstring instruction: "Do not call this tool more than once unless you retrieved new snippets"
+- Prevents redundant LLM calls on identical data
+- Agent encouraged to retrieve → analyze → retrieve new data → analyze again (not analyze same data twice)
+- Supports multi-tool calls when analyzing different datasets (e.g., comparing vendors)
+
 ### Agentic Architecture (LLM-Driven Tool Selection)
 The system uses **LangChain's create_agent()** framework for autonomous tool selection and multi-step reasoning:
 
 **Agent Implementation (`agentic_response` in chains.py:43-116):**
 1. Initial retrieval with `retrieve_documents()` to check for relevant reviews
-2. If reviews found, creates agent with:
-   - Model: GPT-4o from `get_llm()`
+2. **Conversation History Processing:** Filters session history to include only user/assistant messages (strips tool outputs to reduce tokens)
+3. If reviews found, creates agent with:
+   - Model: GPT-4o-mini from `get_llm()`
    - Tools: `[summarize_sentiment, extract_top_aspects, infer_jtbd, retrieve_reviews]`
    - System prompt: Agent-specific instructions from `agent_system.txt`
-3. Agent invoked with user message via new Agents API
-4. LLM autonomously decides which tools to call based on:
+4. Agent invoked with conversation history + current user message via Agents API
+5. LLM autonomously decides which tools to call based on:
    - User question intent
    - Tool descriptions and docstrings
    - Current context and previous tool outputs
-5. Tool outputs collected from ToolMessage entries in message history
-6. Final response synthesized from last AI message
+   - Previous conversation context (enables follow-up understanding)
+6. Tool outputs collected from ToolMessage entries in message history
+7. Final response synthesized from last AI message, preserving conversational context
 
 **Key Features:**
 - No manual keyword routing - LLM decides tool selection
@@ -150,6 +158,87 @@ The system uses **LangChain's create_agent()** framework for autonomous tool sel
 - FETCH_K=30 (candidates before diversification)
 - LAMBDA_MMR=0.5 (0=most diverse, 1=most relevant)
 - Deduplication by review_id to avoid duplicate chunks from same review
+
+### Conversational Memory
+The system implements full conversation history tracking for context-aware interactions:
+
+**Implementation (`agentic_response` in chains.py:54-90 and app.py:95-97, 292-311):**
+- **Session State:** Streamlit session state stores complete conversation history across turns
+- **Message Filtering:** Before passing to agent, strips tool outputs and metadata to reduce token usage
+- **Context Preservation:** Agent receives previous user/assistant messages for multi-turn understanding
+- **History Format:** List of dictionaries with `role` (user/assistant) and `content` keys
+- **Benefits:** Enables follow-up questions, pronoun resolution, and iterative refinement
+
+**Example Flow:**
+1. User: "What do customers say about Scaleway?"
+2. Agent: [provides analysis]
+3. User: "How does that compare to OVH?" ← Agent understands "that" refers to Scaleway analysis
+4. Agent: [retrieves OVH data and provides comparison]
+
+### Multi-Tool Call Support
+The agent can invoke the same tool multiple times with different parameters for comprehensive analysis:
+
+**Implementation (app/chains.py:102-133 and app/app.py:186-210):**
+- **Tool Output Storage:** Stored as list (not dict) to preserve multiple calls and their order
+- **UI Display:** Numbered instances for repeated tools (e.g., "Sentiment Analysis #1", "Sentiment Analysis #2")
+- **Use Cases:**
+  - Compare sentiment across multiple vendors (retrieve + analyze each separately)
+  - Analyze different aspect categories in sequence
+  - Iterative retrieval with refined parameters
+- **Token Efficiency:** Each tool docstring includes "Do not call this tool more than once unless you retrieved new snippets" to prevent redundant analysis
+
+**Example Agent Reasoning:**
+```
+User: "Compare pricing sentiment between OVH and Scaleway"
+→ Agent calls: retrieve_reviews(vendor="ovh", question="pricing")
+→ Agent calls: sentiment_analysis(snippets=[ovh_reviews])
+→ Agent calls: retrieve_reviews(vendor="scaleway", question="pricing")
+→ Agent calls: sentiment_analysis(snippets=[scaleway_reviews])
+→ Agent synthesizes comparison
+```
+
+### Database Statistics
+Real-time vendor breakdown display in the Streamlit UI sidebar:
+
+**Implementation (app/clients.py:63-86 and app/app.py:242-260):**
+- **Function:** `get_review_stats()` queries SQLite database for vendor counts
+- **Display Format:**
+  ```
+  📊 Database Statistics
+  Total Reviews: 12,345
+
+  - cherry_servers: 1,234 (10.0%)
+  - digital_ocean: 2,345 (19.0%)
+  - hetzner: 3,456 (28.0%)
+  - ovh: 2,234 (18.1%)
+  - scaleway: 1,876 (15.2%)
+  - vultr: 1,200 (9.7%)
+  ```
+- **Benefits:** Users can see data coverage before querying, understand vendor representation
+
+### Additional UI Features
+Streamlit interface includes several usability enhancements:
+
+**Clear Conversation Button (app/app.py:110-113):**
+- Resets conversation history to empty list
+- Reinitializes TokenTracker to reset token count
+- Allows users to start fresh without reloading the app
+
+**Example Questions (app/app.py:227-239):**
+- Four clickable demo questions for quick exploration
+- Examples: "What are the main pain points?", "Compare support quality", "Analyze pricing sentiment"
+- One-click population of query input field
+
+**Message Count Display (app/app.py:176):**
+- Shows number of conversation turns in sidebar
+- Format: "💬 Messages: 5"
+- Helps users track conversation depth
+
+**Tool Output Expanders (app/app.py:184-210):**
+- Collapsible sections for each tool result
+- Automatically handles multiple calls with numbering
+- Example: "🔍 Sentiment Analysis #1", "🔍 Sentiment Analysis #2"
+- Preserves clean interface while showing comprehensive results
 
 ### Security Considerations
 - Prompt injection protection (treat review text as untrusted data)
@@ -191,10 +280,11 @@ The application is specialized for cloud hosting provider reviews with:
 ## Monitoring and Evaluation
 
 - **LangSmith integration** for tracing agent execution and tool calls (set LANGCHAIN_TRACING_V2=1)
-- **Token Tracking:** Session-scoped tracking via TokenTracker callback (50k token limit per session)
+- **Token Tracking:** Session-scoped tracking via TokenTracker callback (100k token limit per session)
   - Real-time usage display in sidebar with progress bar
   - Warning when 90% limit reached
   - Prevents execution when limit exceeded
+  - Message count displayed to track conversation length
 - **RAG framework** for RAG evaluation (Answer Faithfulness, Context Precision/Recall)
 - **Error handling** with user-friendly messages in Streamlit UI
 - **Rate limiting** and retry policies for API calls (max_retries=3 for LLM and embeddings)

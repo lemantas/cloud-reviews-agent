@@ -17,7 +17,7 @@ This is an AI-powered customer review analysis platform that helps businesses un
     - "What do customers love?" (Bias toward 4-5 star reviews)
     - "What issues do they face?" (Bias toward 1-3 star reviews)
 - Context Assembly: Finds most relevant review snippets with source citations
-- Answer Generation: GPT-4o creates responses with proper attribution
+- Answer Generation: GPT-4o-mini creates responses with proper attribution (optimized for faster responses)
 
 ### 3. Domain Tools & Function Calling
 
@@ -39,58 +39,50 @@ Insights Agent Mode:
 - Example: "Analyze Scaleway reviews" --> Automatically runs sentiment analysis + aspect extraction + JTBD
 - All three tools validated by Pydantic models (Sentiment, AspectAnalysis, JTBD) for structured output
 
-## Agentic refactoring
+## Advanced Agentic Features
 
-### 1. LLM-Based Tool Selection
+The system implements sophisticated AI agent capabilities that enable intelligent, context-aware analysis:
 
-LLM-Based Tool Selection
-- LLM decides which tools to use
-- More accurate tool selection (no manual keyword lists)
-- Handles ambiguous queries better ("analyze Scaleway" → agent decides to run all 3 tools)
-- User doesn't need to know which tool does what
+### 1. Autonomous Tool Selection
 
-Changes needed:
-  - Convert your 3 tools (summarize_sentiment, extract_top_aspects, infer_jtbd) to LangChain tool format
-  - Use ChatOpenAI.bind_tools() to let GPT-4o decide which tools to invoke
-  - Remove route_query_to_tools() function
-  - Let the agent autonomously choose 0, 1, 2, or all 3 tools based on the question
+The LLM intelligently decides which analysis tools to invoke based on query intent - no keyword matching required:
 
-### 2. Multi-Step Reasoning
+- **Smart Routing:** "Analyze Scaleway reviews" → Agent autonomously runs sentiment analysis, aspect extraction, and JTBD analysis
+- **Intent Understanding:** "What frustrates customers?" → Agent chooses JTBD analysis without being explicitly told
+- **Flexible Combinations:** Agent can invoke 0, 1, 2, or all tools depending on what's needed for the query
+- **User-Friendly:** Users ask natural questions without needing to know which tools exist
 
-ReAct-style agent that can perform multi-step analysis:
-- Handles comparative questions
-- Can drill down based on findings ("I see pricing issues, let me get more pricing reviews")
-- More natural conversation flow
+**Implementation:** LangChain's `create_agent()` framework with GPT-4o-mini making real-time tool selection decisions
 
-Changes needed:
-- Use LangChain's create_agent() or AgentExecutor
-- Add a "retrieve_reviews" tool that the agent can call dynamically
-- Agent decides: retrieve → analyze → retrieve again → synthesize
+### 2. Multi-Step Reasoning & Dynamic Retrieval
 
-Example flow:
-  1. User asks: "Compare pricing sentiment between OVH and Scaleway"
-  2. Agent thinks: "I need sentiment analysis for each vendor"
-  3. Agent retrieves OVH reviews → runs sentiment tool
-  4. Agent retrieves Scaleway reviews → runs sentiment tool
-  5. Agent synthesizes comparison
+ReAct-style agent that iterates through analysis cycles for comprehensive insights:
 
+- **Comparative Analysis:** "Compare pricing sentiment between OVH and Scaleway" → Agent retrieves OVH reviews → analyzes → retrieves Scaleway reviews → analyzes → synthesizes comparison
+- **Iterative Refinement:** Can retrieve reviews with different parameters based on initial findings
+- **Drill-Down Capability:** Discovers pricing issues → retrieves more pricing-specific reviews → provides deeper analysis
+- **Natural Flow:** Multi-turn reasoning without requiring user to break down the request
 
-### 3. Follow-Up Capabilities
+**Example Agent Flow:**
+```
+User: "Compare pricing sentiment between OVH and Scaleway"
+→ retrieve_reviews(vendor="ovh", question="pricing")
+→ sentiment_analysis(ovh_reviews)
+→ retrieve_reviews(vendor="scaleway", question="pricing")
+→ sentiment_analysis(scaleway_reviews)
+→ Synthesize comparison with citations
+```
 
-Let the agent ask clarifying questions or suggest follow-ups:
-- Makes the agent feel interactive and helpful
-- Guides non-technical users
-- Natural conversation flow
+### 3. Conversational Memory & Follow-Ups
 
-Example:
-- User: "Tell me about customer issues"
-- Agent: "I found 3 main issue categories. Would you like me to analyze sentiment for each category
-separately?"
+Full conversation context tracking enables natural multi-turn interactions:
 
-Changes needed:
-  - Modify agent prompt to include follow-up question generation
-  - Add session memory (store conversation history in st.session_state)
-  - Display suggested follow-up questions as clickable buttons
+- **Context Preservation:** "Tell me about Scaleway" → [response] → "How does that compare to OVH?" (agent understands "that" refers to Scaleway)
+- **Follow-Up Suggestions:** Agent can ask clarifying questions when queries are ambiguous
+- **Iterative Exploration:** Users can drill down into findings across multiple turns without repeating context
+- **Session Management:** Clear conversation button to start fresh analyses
+
+**Benefits:** Makes the agent feel interactive and helpful, guiding users through complex analyses naturally
 
 ## Technical Implementation
 
@@ -102,17 +94,17 @@ Changes needed:
   - **models.py**: Pydantic schemas for structured tool outputs (Sentiment, AspectAnalysis, JTBD)
   - **prompts.py**: Prompt template loaders and constructors
   - **prompts/**: External prompt text files (rag_system.txt, agent_system.txt, sentiment_analysis.txt, aspects_analysis.txt, jtbd_analysis.txt)
-  - **chains.py**: High-level orchestration (simple RAG + keyword-based tool routing)
-  - **token_tracker.py**: Session-scoped token tracking and rate limiting
-  - **app.py**: Streamlit user interface with formatting functions
+  - **chains.py**: High-level orchestration (simple RAG + agentic response with LLM-driven tool selection)
+  - **token_tracker.py**: Session-scoped token tracking and rate limiting (100k limit)
+  - **app.py**: Streamlit user interface with conversation state management and formatting functions
 
 ### Key Technologies
 
-  - LangChain: AI workflow orchestration
-  - OpenAI: GPT-4o for reasoning + text-embedding-3-small for search
+  - LangChain: AI workflow orchestration with Agents API
+  - OpenAI: GPT-4o-mini for reasoning (faster responses) + text-embedding-3-small for search
   - Chroma: Vector database for semantic search
   - SQLite: Traditional database for structured queries
-  - Streamlit: Web interface
+  - Streamlit: Web interface with session state management
 
 
 ## User Experience
@@ -125,10 +117,26 @@ Changes needed:
 
 ### Output Format
 
-- Main Response: Bullet points with source citations
-- Tool Analysis: Structured insights (sentiment breakdown, aspect rankings, jobs-to-be-done)
-- Retrieved Context: Source review snippets for transparency
-- Export: Download data as CSV
+- **Main Response:** Synthesized insights with inline source citations `[source | YYYY-MM-DD]`
+- **Tool Analysis:** Structured insights in expandable sections
+  - Sentiment breakdown (ratings, themes, statistics)
+  - Aspect rankings (frequency, sentiment scores, example quotes)
+  - Jobs-to-be-done patterns (motivations, frustrations, outcomes)
+  - Multi-tool support: Same tool called multiple times numbered (#1, #2, etc.)
+- **Retrieved Context:** Source review snippets with full metadata (rating, date, vendor, review header)
+- **Database Statistics (Sidebar):**
+  - Total review count
+  - Per-vendor breakdown with percentages
+  - Example: `ovh: 2,234 (18.1%)`
+- **Token Usage Display:**
+  - Real-time tracking with progress bar (100k limit per session)
+  - Warning at 90% threshold
+  - Message count indicator
+- **Interactive Features:**
+  - Clear conversation button
+  - Example questions for quick demos
+  - Collapsible tool output expanders
+- **Export:** Download complete results as CSV with metadata
 
 
 ## Domain Specialization
@@ -141,15 +149,32 @@ Focused on Cloud Hosting Reviews:
 
 ## Smart Features
 
-### Query Routing
+### Intelligent Tool Selection
 
-- Keyword-based detection of user intent
-- Routes to appropriate analysis tools automatically:
-  - Sentiment keywords: `summarize_sentiment`
-  - Aspect keywords: `extract_top_aspects`
-  - JTBD keywords: `infer_jtbd`
-- Applies sentiment filters to retrieval based on query keywords
-- If no specific tool detected, runs all three for comprehensive analysis
+The agent uses LLM-driven reasoning to select appropriate analysis tools - no hardcoded keywords required:
+
+- **Natural Language Understanding:** GPT-4o-mini interprets query intent and autonomously chooses which tools to invoke
+- **Adaptive Analysis:** "What frustrates customers?" → Agent recognizes JTBD analysis needed; "How's the pricing?" → Aspect extraction + sentiment analysis
+- **Multi-Tool Orchestration:** Complex queries trigger multiple tools in sequence (e.g., "Analyze Scaleway" → all 3 analysis tools)
+- **Dynamic Retrieval:** Agent can call `retrieve_reviews` multiple times with different parameters for comparative or iterative analysis
+
+**Example Intelligence:**
+```
+Query: "How do customers feel about Scaleway pricing?"
+Agent Reasoning:
+  1. Recognizes vendor filter needed (Scaleway)
+  2. Identifies pricing aspect focus
+  3. Determines sentiment analysis required
+  4. Calls: retrieve_reviews(vendor="scaleway", question="pricing")
+     → aspect_extraction() → sentiment_analysis()
+  5. Synthesizes pricing-specific sentiment insights
+```
+
+**Advantages Over Keyword Routing:**
+- Handles ambiguous phrasing naturally ("What's the vibe?" → sentiment analysis)
+- No maintenance of keyword lists needed
+- Understands context from conversation history
+- Gracefully handles queries requiring multiple tools
 
 ### Citation & Trust
 
