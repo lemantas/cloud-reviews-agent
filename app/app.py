@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 from chains import agentic_response, simple_rag_response
-from clients import get_vector_store, set_callbacks
+from clients import get_vector_store, set_callbacks, get_review_stats
 from token_tracker import TokenTracker
 
 # Formatting functions for tool outputs
@@ -83,7 +83,7 @@ def format_jtbd_analysis(data):
 
 # Page config
 st.set_page_config(
-    page_title="Customer Reviews RAG",
+    page_title="Cloud Vendor Analysis RAG",
     page_icon="⭐",
     layout="wide"
 )
@@ -97,14 +97,10 @@ if 'messages' not in st.session_state:
     st.session_state.messages = []
 
 # Title and header
-st.title("⭐ Customer Reviews RAG")
-st.markdown("*Analyze customer reviews of your favorite Cloud Infrastructure provider*")
+st.title("⭐ Cloud Vendor Analysis RAG")
+st.markdown("*Analyze customer reviews of selected cloud vendors*")
 
 # Sidebar filters
-st.sidebar.header("🔍 Filters")
-
-# Token usage display
-st.sidebar.markdown("---")
 st.sidebar.write(f"**Tokens:** {tracker.used:,} / {tracker.max_tokens:,}")
 st.sidebar.progress(tracker.used / tracker.max_tokens if tracker.max_tokens > 0 else 0)
 if tracker.used / tracker.max_tokens > 0.9:
@@ -118,23 +114,7 @@ if st.sidebar.button("🗑️ Clear Conversation", help="Start a new conversatio
 
 st.sidebar.markdown("---")
 
-# Vendor selection
-vendor_options = ["All", "cherry_servers", "ovh", "hetzner", "digital_ocean", "scaleway", "vultr"]
-selected_vendor = st.sidebar.selectbox(
-    "Cloud Provider",
-    vendor_options,
-    help="Filter reviews by specific Cloud Infrastructure provider"
-)
-
-# Chunk type selection
-chunk_type = st.sidebar.selectbox(
-    "Search Granularity",
-    ["sentence", "review"],
-    index=0,
-    help="sentence: Analyze each sentence; review: Analyze the entire review"
-)
-
-# Analysis mode
+# Analysis mode - moved to top
 analysis_mode = st.sidebar.selectbox(
     "Analysis Mode",
     ["agent", "simple"],
@@ -142,33 +122,58 @@ analysis_mode = st.sidebar.selectbox(
     help="agent: uses domain tools (sentiment, aspects, JTBD) for deeper analysis; simple: uses simple RAG"
 )
 
-# Advanced retrieval settings
-with st.sidebar.expander("⚙️ Advanced Settings"):
-    st.markdown("**MMR Retrieval Parameters**")
-
-    top_k = st.number_input(
-        "Reviews to return",
-        min_value=1,
-        max_value=50,
-        value=12,
-        help="Number of reviews to return"
+# Only show these options in simple mode - agent decides parameters autonomously
+if analysis_mode == "simple":
+    # Vendor selection
+    vendor_options = ["All", "cherry_servers", "ovh", "hetzner", "digital_ocean", "scaleway", "vultr"]
+    selected_vendor = st.sidebar.selectbox(
+        "Cloud Provider",
+        vendor_options,
+        help="Filter reviews by specific Cloud Infrastructure provider"
     )
 
-    fetch_k = st.number_input(
-        "Reviews to consider",
-        min_value=1,
-        max_value=100,
-        value=30,
-        help="Number of reviews to consider before diversification (MMR)"
+    # Chunk type selection
+    chunk_type = st.sidebar.selectbox(
+        "Search Granularity",
+        ["sentence", "review"],
+        index=0,
+        help="sentence: Analyze each sentence; review: Analyze the entire review"
     )
 
-    st.caption(f"Will fetch {fetch_k} candidates and return top {top_k} diverse results")
+    # Advanced retrieval settings
+    with st.sidebar.expander("⚙️ Advanced Settings"):
+        st.markdown("**MMR Retrieval Parameters**")
+
+        top_k = st.number_input(
+            "Reviews to return",
+            min_value=10,
+            max_value=100,
+            value=12,
+            help="Number of reviews to return"
+        )
+
+        fetch_k = st.number_input(
+            "Reviews to consider",
+            min_value=top_k,  # Ensure fetch_k is always >= top_k
+            max_value=300,
+            value=max(30, top_k),  # Default to 30 or top_k, whichever is higher
+            help="Number of reviews to consider before diversification (MMR). Must be >= Reviews to return."
+        )
+
+        st.caption(f"Will fetch {fetch_k} candidates and return top {top_k} diverse results")
+else:
+    # Set defaults for agent mode (agent will decide actual parameters via tools)
+    selected_vendor = None
+    chunk_type = "sentence"
+    top_k = 12
+    fetch_k = 30
 
 # Main content area
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.header("💬 Conversation")
+    if st.session_state.messages:
+        st.metric("Messages", len(st.session_state.messages))
 
     # Display chat history
     for msg in st.session_state.messages:
@@ -177,8 +182,23 @@ with col1:
 
             # Show tool outputs for assistant messages
             if msg.get("tool_outputs"):
-                for tool_name, output in msg["tool_outputs"].items():
-                    with st.expander(f"📊 {tool_name.replace('_', ' ').title()}", expanded=False):
+                # tool_outputs is now a list of {"name": ..., "output": ...}
+                # Count occurrences of each tool to add index for duplicates
+                tool_counts = {}
+                for i, tool_entry in enumerate(msg["tool_outputs"]):
+                    tool_name = tool_entry.get("name", "unknown")
+                    output = tool_entry.get("output", {})
+
+                    # Track count for this tool name
+                    tool_counts[tool_name] = tool_counts.get(tool_name, 0) + 1
+                    current_count = tool_counts[tool_name]
+
+                    # Add index if tool is called multiple times
+                    display_name = tool_name.replace('_', ' ').title()
+                    if msg["tool_outputs"].count(tool_entry) > 1 or sum(1 for t in msg["tool_outputs"] if t.get("name") == tool_name) > 1:
+                        display_name = f"{display_name} #{current_count}"
+
+                    with st.expander(f"📊 {display_name}", expanded=False):
                         # Use existing formatters
                         if tool_name == "sentiment_analysis":
                             st.markdown(format_sentiment_analysis(output))
@@ -207,17 +227,10 @@ with col1:
     if len(st.session_state.messages) == 0:
         with st.expander("💡 Example Questions", expanded=True):
             example_questions = [
-                # Sentiment analysis triggers
-                "What are customers' overall sentiment about the service?",
-                # Aspect extraction triggers
-                "What are the most discussed aspects of the service?",
-                # JTBD analysis triggers
-                "What job are customers trying to accomplish?",
-                # Multiple tools (comprehensive)
-                "Give me a complete analysis of customer feedback.",
-                # Follow-up examples
-                "Tell me about customer issues",
-                "Can you dig deeper into pricing concerns?",
+                "How customers feel about Cherry Servers?",
+                "Compare worst features of Hetzner vs. OVH.",
+                "What is the main UX issue with most cloud vendors?",
+                "Can you dig deeper into Scaleway pricing concerns?",
             ]
 
             for i, eq in enumerate(example_questions):
@@ -231,11 +244,19 @@ with col2:
 
         # Get collection stats
         st.metric("Database Status", "Connected ✅")
-        st.info("**Tip**: Use Example Questions to get started. The agent can analyze sentiment, extract key aspects, identify customer jobs-to-be-done, or provide comprehensive analysis. Ask follow-up questions to dig deeper!")
 
-        # Show conversation stats
-        if st.session_state.messages:
-            st.metric("Messages", len(st.session_state.messages))
+        # Collected Reviews section
+        review_stats = get_review_stats()
+        if review_stats:
+            total_reviews = sum(review_stats.values())
+            st.metric("Total Reviews", f"{total_reviews:,}")
+
+            # Display vendor breakdown in a compact format
+            for vendor, count in review_stats.items():
+                # Format vendor name nicely
+                vendor_display = vendor.replace('_', ' ').title()
+                percentage = (count / total_reviews * 100) if total_reviews > 0 else 0
+                st.markdown(f"**{vendor_display}:** {count:,} ({percentage:.1f}%)")
 
     except Exception as e:
         st.error(f"Database connection issue: {str(e)}")

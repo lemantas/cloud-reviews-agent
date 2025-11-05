@@ -40,14 +40,14 @@ def simple_rag_response(question, chunk_type="sentence", vendor=None, top_k=None
 
         return {
             "response": response,
-            "tool_outputs": {},
+            "tool_outputs": [],
             "snippets": snippets
         }
 
     except Exception as e:
         return {
             "response": f"Error processing your question: {str(e)}",
-            "tool_outputs": {},
+            "tool_outputs": [],
             "snippets": []
         }
 
@@ -100,8 +100,10 @@ def agentic_response(question, chunk_type="sentence", vendor=None, top_k=None, f
                 break
 
         # Collect simple tool outputs from ToolMessage entries
-        tool_outputs = {}
+        # Use list instead of dict to preserve multiple calls to same tool
+        tool_outputs = []
         snippets = []
+
         for m in messages:
             mtype = getattr(m, "type", None) or getattr(m, "role", None)
             if mtype == "tool":
@@ -126,8 +128,8 @@ def agentic_response(question, chunk_type="sentence", vendor=None, top_k=None, f
 
                 # Normalize known analysis tool outputs to dict for UI formatters
                 if name in ("sentiment_analysis", "aspect_extraction", "jtbd_analysis") and isinstance(parsed, dict):
-                    tool_outputs[name] = parsed
-
+                    # Add as list entry with name and output
+                    tool_outputs.append({"name": name, "output": parsed})
 
         return {
             "response": final_text,
@@ -138,6 +140,6 @@ def agentic_response(question, chunk_type="sentence", vendor=None, top_k=None, f
     except Exception as e:
         return {
             "response": f"Error processing your question: {str(e)}",
-            "tool_outputs": {},
+            "tool_outputs": [],
             "snippets": []
         }
