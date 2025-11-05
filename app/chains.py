@@ -22,9 +22,20 @@ def rag_chain(question, chunk_type="sentence", vendor=None, top_k=None, fetch_k=
     except Exception as e:
         return f"Error processing question: {str(e)}", []
 
-def simple_rag_response(question, chunk_type="sentence", vendor=None, top_k=None, fetch_k=None):
-    """Simple RAG response without tools for basic Q&A."""
+def simple_rag_response(question, chunk_type="sentence", vendor=None, top_k=None, fetch_k=None, conversation_history=None):
+    """Simple RAG response without tools for basic Q&A.
+
+    Args:
+        question: Current user question
+        chunk_type: Type of chunks to retrieve (sentence/review)
+        vendor: Optional vendor filter
+        top_k: Number of results to return
+        fetch_k: Number of candidates for MMR
+        conversation_history: List of previous messages for context
+    """
     try:
+        # For simple RAG, we don't use full conversation history in LLM call
+        # but we could optionally append it to context in future
         response, snippets = rag_chain(question, chunk_type, vendor, top_k, fetch_k)
 
         return {
@@ -40,19 +51,42 @@ def simple_rag_response(question, chunk_type="sentence", vendor=None, top_k=None
             "snippets": []
         }
 
-def agentic_response(question, chunk_type="sentence", vendor=None, top_k=None, fetch_k=None):
-    """Agentic RAG with LLM-driven tool selection for intelligent analysis."""
+def agentic_response(question, chunk_type="sentence", vendor=None, top_k=None, fetch_k=None, conversation_history=None):
+    """Agentic RAG with LLM-driven tool selection for intelligent analysis.
+
+    Args:
+        question: Current user question
+        chunk_type: Type of chunks to retrieve (sentence/review)
+        vendor: Optional vendor filter
+        top_k: Number of results to return
+        fetch_k: Number of candidates for MMR
+        conversation_history: List of previous messages for context
+    """
     try:
         llm = get_llm()
         tools = [summarize_sentiment, extract_top_aspects, infer_jtbd, retrieve_reviews]
         system_text = get_agent_prompt()
         agent = create_agent(model=llm, tools=tools, system_prompt=system_text)
 
-        # Invoke LLM with messages per new Agents API
+        # Build full message history
+        messages = []
+
+        # Add conversation history if provided (excluding tool outputs and metadata)
+        if conversation_history:
+            for msg in conversation_history:
+                # Only include user and assistant messages (not tool outputs)
+                if msg.get("role") in ["user", "assistant"]:
+                    messages.append({
+                        "role": msg["role"],
+                        "content": msg["content"]
+                    })
+
+        # Add current user question
+        messages.append({"role": "user", "content": question})
+
+        # Invoke LLM with full conversation context
         result = agent.invoke({
-            "messages": [
-                {"role": "user", "content": question}
-            ]
+            "messages": messages
         })
 
         messages = result.get("messages", [])

@@ -5,7 +5,7 @@ from langchain_core.callbacks.base import BaseCallbackHandler
 class TokenTracker(BaseCallbackHandler):
     """Simple token tracker for Streamlit + LangChain."""
 
-    def __init__(self, max_tokens=50000):
+    def __init__(self, max_tokens=100000):
         self.max_tokens = max_tokens
         if 'tokens' not in st.session_state:
             st.session_state.tokens = 0

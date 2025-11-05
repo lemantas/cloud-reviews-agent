@@ -89,8 +89,12 @@ st.set_page_config(
 )
 
 # Initialize token tracker
-tracker = TokenTracker(max_tokens=50000)
+tracker = TokenTracker(max_tokens=100000)
 set_callbacks([tracker])
+
+# Initialize conversation history in session state
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
 
 # Title and header
 st.title("⭐ Customer Reviews RAG")
@@ -105,6 +109,13 @@ st.sidebar.write(f"**Tokens:** {tracker.used:,} / {tracker.max_tokens:,}")
 st.sidebar.progress(tracker.used / tracker.max_tokens if tracker.max_tokens > 0 else 0)
 if tracker.used / tracker.max_tokens > 0.9:
     st.sidebar.error("⚠️ Token limit almost reached!")
+
+# Clear conversation button
+if st.sidebar.button("🗑️ Clear Conversation", help="Start a new conversation"):
+    st.session_state.messages = []
+    tracker.reset()
+    st.rerun()
+
 st.sidebar.markdown("---")
 
 # Vendor selection
@@ -157,57 +168,98 @@ with st.sidebar.expander("⚙️ Advanced Settings"):
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.header("Ask about the reviews 🔍︎")
+    st.header("💬 Conversation")
 
-    # Initialize question from session state if available
-    default_question = st.session_state.get('selected_question', '')
+    # Display chat history
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-    # Question input
-    question = st.text_area(
-        "Your question:",
-        value=default_question,
-        placeholder="e.g., What are customers saying about pricing? What issues do they face with support?",
-        height=100,
-        help="Ask about sentiment, aspects, customer jobs-to-be-done, or specific features"
-    )
+            # Show tool outputs for assistant messages
+            if msg.get("tool_outputs"):
+                for tool_name, output in msg["tool_outputs"].items():
+                    with st.expander(f"📊 {tool_name.replace('_', ' ').title()}", expanded=False):
+                        # Use existing formatters
+                        if tool_name == "sentiment_analysis":
+                            st.markdown(format_sentiment_analysis(output))
+                        elif tool_name == "aspect_extraction":
+                            st.markdown(format_aspect_extraction(output))
+                        elif tool_name == "jtbd_analysis":
+                            st.markdown(format_jtbd_analysis(output))
+                        else:
+                            st.markdown(str(output))
 
-    # Example questions
-    with st.expander("💡 Example Questions"):
-        example_questions = [
-            # Sentiment analysis triggers
-            "What are customers' overall sentiment about the service?",
-            # Aspect extraction triggers
-            "What are the most discussed aspects of the service?",
-            # JTBD analysis triggers
-            "What job are customers trying to accomplish?",
-            # Multiple tools (comprehensive)
-            "Give me a complete analysis of customer feedback.",
-        ]
+            # Show snippets for assistant messages
+            if msg.get("snippets"):
+                with st.expander(f"📄 Retrieved Context ({len(msg['snippets'])} snippets)", expanded=False):
+                    for i, snippet in enumerate(msg["snippets"], 1):
+                        source_info = f"**{snippet.get('source', 'Anonymous')}** - {snippet.get('date', 'Unknown date')}"
+                        vendor_info = f" - {snippet.get('vendor', '').upper()}" if snippet.get('vendor') else ""
+                        rating_info = f" - ⭐ {snippet.get('rating', 'N/A')}/5" if snippet.get('rating') else ""
 
-        for i, eq in enumerate(example_questions):
-            if st.button(eq, key=f"example_{i}"):
-                st.session_state.selected_question = eq
-                st.rerun()
+                        st.markdown(f"**#{i}** {source_info}{vendor_info}{rating_info}")
+                        if snippet.get('review_header'):
+                            st.markdown(f"*{snippet['review_header']}*")
+                        st.markdown(f'"{snippet.get("text", "")}"')
+                        st.markdown("---")
+
+    # Example questions - show at top if no messages yet
+    if len(st.session_state.messages) == 0:
+        with st.expander("💡 Example Questions", expanded=True):
+            example_questions = [
+                # Sentiment analysis triggers
+                "What are customers' overall sentiment about the service?",
+                # Aspect extraction triggers
+                "What are the most discussed aspects of the service?",
+                # JTBD analysis triggers
+                "What job are customers trying to accomplish?",
+                # Multiple tools (comprehensive)
+                "Give me a complete analysis of customer feedback.",
+                # Follow-up examples
+                "Tell me about customer issues",
+                "Can you dig deeper into pricing concerns?",
+            ]
+
+            for i, eq in enumerate(example_questions):
+                if st.button(eq, key=f"example_{i}"):
+                    st.session_state.selected_question = eq
+                    st.rerun()
 
 with col2:
     try:
         vector_store = get_vector_store()
 
-        # Get collection stats (will add basic dataset stats later)
+        # Get collection stats
         st.metric("Database Status", "Connected ✅")
-        st.info("**Tip**: Use Example Questions to get started. The agent can analyze sentiment (1st question), extract key aspects (2nd question), identify customer jobs-to-be-done (3rd question), or give a complete analysis of customer feedback (4th question).")
+        st.info("**Tip**: Use Example Questions to get started. The agent can analyze sentiment, extract key aspects, identify customer jobs-to-be-done, or provide comprehensive analysis. Ask follow-up questions to dig deeper!")
+
+        # Show conversation stats
+        if st.session_state.messages:
+            st.metric("Messages", len(st.session_state.messages))
 
     except Exception as e:
         st.error(f"Database connection issue: {str(e)}")
 
-# Analyze button
-if st.button("Analyze", type="primary", disabled=not question.strip()):
+# Chat input - placed outside columns for better layout
+# Check for selected question from example buttons
+if st.session_state.get('selected_question'):
+    question = st.session_state.selected_question
+    st.session_state.selected_question = None  # Clear after use
+else:
+    question = st.chat_input("Ask about customer reviews...")
+
+# Process chat input
+if question:
     # Check token limit
     if tracker.is_exceeded:
-        st.error("🚨 Token limit exceeded! Refresh the page to start a new session.")
-    elif question.strip():
-        # Clear previous results
-        st.session_state.last_result = None
+        st.error("🚨 Token limit exceeded! Click 'Clear Conversation' to start fresh.")
+    else:
+        # Add user message to history
+        st.session_state.messages.append({
+            "role": "user",
+            "content": question,
+            "timestamp": datetime.now()
+        })
 
         # Prepare parameters
         vendor_param = None if selected_vendor == "All" else selected_vendor
@@ -216,81 +268,61 @@ if st.button("Analyze", type="primary", disabled=not question.strip()):
         with st.spinner("Analyzing reviews..."):
             try:
                 # Choose analysis function based on mode
+                # Pass all messages except the one we just added (which is already in question)
+                conversation_history = st.session_state.messages[:-1]
+
                 if analysis_mode == "agent":
-                    result = agentic_response(question, chunk_type, vendor_param, top_k, fetch_k)
+                    result = agentic_response(
+                        question,
+                        chunk_type,
+                        vendor_param,
+                        top_k,
+                        fetch_k,
+                        conversation_history=conversation_history
+                    )
                 else:
-                    result = simple_rag_response(question, chunk_type, vendor_param, top_k, fetch_k)
+                    result = simple_rag_response(
+                        question,
+                        chunk_type,
+                        vendor_param,
+                        top_k,
+                        fetch_k,
+                        conversation_history=conversation_history
+                    )
 
-                # Store result in session state
-                st.session_state.last_result = result
+                # Add assistant response to history
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": result["response"],
+                    "timestamp": datetime.now(),
+                    "tool_outputs": result.get("tool_outputs", {}),
+                    "snippets": result.get("snippets", [])
+                })
 
-                # Force rerun to update token count immediately
+                # Force rerun to display new messages
                 st.rerun()
 
             except Exception as e:
                 st.error(f"Error processing your question: {str(e)}")
                 st.info("Try simplifying your question or checking your filters.")
+                # Remove the user message that caused the error
+                if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                    st.session_state.messages.pop()
 
-# Display results if available (after rerun)
-if 'last_result' in st.session_state and st.session_state.last_result:
-    result = st.session_state.last_result
+# Download option for last assistant message with snippets
+if st.session_state.messages:
+    last_assistant_msg = None
+    for msg in reversed(st.session_state.messages):
+        if msg["role"] == "assistant" and msg.get("snippets"):
+            last_assistant_msg = msg
+            break
 
-    # Display results
-    st.header("📋 Results")
-
-    # Show token usage for this request
-    st.success(f"✅ Analysis complete! {tracker.remaining:,} tokens remaining")
-
-    # Main response
-    st.markdown("### Response:")
-    st.markdown(result["response"])
-
-    # Tool outputs (if any)
-    if result.get("tool_outputs"):
-        st.markdown("### Tools Analysis")
-        for tool_name, output in result["tool_outputs"].items():
-            with st.expander(f"📊 {tool_name.replace('_', ' ').title()}", expanded=True):
-                # Format based on tool type
-                if tool_name == "sentiment_analysis":
-                    formatted_output = format_sentiment_analysis(output)
-                elif tool_name == "aspect_extraction":
-                    formatted_output = format_aspect_extraction(output)
-                elif tool_name == "jtbd_analysis":
-                    formatted_output = format_jtbd_analysis(output)
-                else:
-                    # Fallback for any unknown tools
-                    formatted_output = str(output)
-
-                st.markdown(formatted_output)
-
-    # Retrieved context
-    if result.get("snippets"):
-        with st.expander(f"Retrieved Context ({len(result['snippets'])} snippets)", expanded=False):
-            for i, snippet in enumerate(result["snippets"], 1):
-                # Clean up the display
-                source_info = f"**{snippet.get('source', 'Anonymous')}** - {snippet.get('date', 'Unknown date')}"
-                vendor_info = f" - {snippet.get('vendor', '').upper()}" if snippet.get('vendor') else ""
-                rating_info = f" - ⭐ {snippet.get('rating', 'N/A')}/5" if snippet.get('rating') else ""
-
-                st.markdown(f"**#{i}** {source_info}{vendor_info}{rating_info}")
-
-                # Show review header if available
-                if snippet.get('review_header'):
-                    st.markdown(f"*{snippet['review_header']}*")
-
-                # Show the whole snippet text
-                text = snippet.get('text', '')
-                st.markdown(f'"{text}"')
-                st.markdown("---")
-
-    # Download option for snippets
-    if result.get("snippets"):
-        # Convert to DataFrame for download
-        df = pd.DataFrame(result["snippets"])
+    if last_assistant_msg:
+        df = pd.DataFrame(last_assistant_msg["snippets"])
         csv = df.to_csv(index=False)
 
         st.download_button(
-            label="Download Retrieved Data (CSV)",
+            label="Download Last Retrieved Data (CSV)",
             data=csv,
             file_name=f"review_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv"
@@ -307,7 +339,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-# Session state cleanup
-if 'question' in st.session_state:
-    del st.session_state.question
