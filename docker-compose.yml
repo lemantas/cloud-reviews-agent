@@ -14,11 +14,8 @@ services:
       - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
       - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-agentic-rag}
     volumes:
-      # Persist database and vector store
-      - ./data/sqlite.db:/app/data/sqlite.db
-      - ./data/chroma_db:/app/data/chroma_db
-      # Mount reviews directory for data ingestion
-      - ./data/reviews:/app/data/reviews
+      # Mount entire data directory for persistence
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]

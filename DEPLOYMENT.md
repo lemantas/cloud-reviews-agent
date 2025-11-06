@@ -170,26 +170,125 @@ cp .env.example .env
 nano .env
 # Add your OPENAI_API_KEY
 
-# Copy your pre-ingested data (if available)
-# Option A: SCP from local machine
-# On your local machine:
-scp -r data/sqlite.db appuser@YOUR_VPS_IP:~/cloud-reviews-agent
-scp -r data/chroma_db appuser@YOUR_VPS_IP:~/cloud-reviews-agent
+# ⚠️ IMPORTANT: You need data before starting!
+# See "Step 3b: Data Management" below
 
-# Option B: Run ingestion on VPS
-# Make sure data/reviews/*.csv are present, then:
-docker run --rm \
-  -v $(pwd)/data:/app/data \
-  -v $(pwd)/app:/app/app \
-  --env-file .env \
-  python:3.11-slim \
-  bash -c "pip install uv && uv run python app/ingest.py"
-
-# Build and start
+# Build and start (data must exist first!)
 docker-compose up -d
 
 # Check logs
 docker-compose logs -f
+```
+
+### Step 3b: Data Management (IMPORTANT!)
+
+The application requires `data/sqlite.db` and `data/chroma_db/` to function. You have **three options**:
+
+#### **Option A: Copy Pre-Ingested Data from Local Machine (Recommended)**
+
+If you already ran `uv run python app/ingest.py` locally:
+
+```bash
+# On your LOCAL machine (not VPS):
+# Navigate to your project directory
+cd /path/to/mlevin-AE.3.5
+
+# Verify data exists locally
+ls -lh data/sqlite.db        # Should show file size (e.g., 2.5M)
+ls -la data/chroma_db/        # Should show directory with files
+
+# Copy to VPS using SCP
+scp data/sqlite.db appuser@YOUR_VPS_IP:~/cloud-reviews-agent/data/
+scp -r data/chroma_db appuser@YOUR_VPS_IP:~/cloud-reviews-agent/data/
+
+# Also copy review CSV files (needed for reference)
+scp -r data/reviews appuser@YOUR_VPS_IP:~/cloud-reviews-agent/data/
+```
+
+**Verify on VPS:**
+```bash
+# SSH into VPS
+ssh appuser@YOUR_VPS_IP
+
+# Check data arrived
+cd ~/cloud-reviews-agent
+ls -lh data/sqlite.db         # Should show file
+ls -la data/chroma_db/        # Should show chroma files
+du -sh data/chroma_db/        # Check size (e.g., 50M)
+```
+
+#### **Option B: Run Ingestion Inside Docker Container**
+
+If you have `data/reviews/*.csv` files but no ingested data:
+
+```bash
+# On VPS: Make sure you're in project directory
+cd ~/cloud-reviews-agent
+
+# Copy CSV files to VPS if needed
+# scp -r data/reviews/*.csv appuser@YOUR_VPS_IP:~/cloud-reviews-agent/data/reviews/
+
+# Verify CSV files exist
+ls data/reviews/*.csv
+
+# Build the Docker image first
+docker-compose build
+
+# Run ingestion inside a temporary container
+docker-compose run --rm agentic-rag uv run python app/ingest.py
+
+# This will create:
+# - data/sqlite.db
+# - data/chroma_db/
+
+# Verify data was created
+ls -lh data/sqlite.db
+ls -la data/chroma_db/
+```
+
+#### **Option C: Use Pre-Committed Data in Git**
+
+If your data is small enough (<100MB), commit it to git:
+
+```bash
+# On LOCAL machine:
+git add data/sqlite.db data/chroma_db/
+git commit -m "Add pre-ingested review data"
+git push
+
+# On VPS:
+git pull origin main
+
+# Data automatically available!
+```
+
+#### **Verify Data in Running Container**
+
+After starting the container, verify data is properly mounted:
+
+```bash
+# Start container (if not already running)
+docker-compose up -d
+
+# Check if data exists INSIDE container
+docker exec agentic-rag-app ls -lh /app/data/sqlite.db
+# Should show: -rw-r--r-- 1 root root 2.5M ...
+
+docker exec agentic-rag-app ls -la /app/data/chroma_db/
+# Should show directory contents
+
+# Check database statistics
+docker exec agentic-rag-app sqlite3 /app/data/sqlite.db "SELECT COUNT(*) FROM reviews;"
+# Should show number of reviews (e.g., 12345)
+
+# Check Chroma collection
+docker exec agentic-rag-app python -c "
+import chromadb
+client = chromadb.PersistentClient(path='/app/data/chroma_db')
+collection = client.get_collection('reviews')
+print(f'Total vectors: {collection.count()}')
+"
+# Should show vector count
 ```
 
 ### Step 4: Configure Firewall
