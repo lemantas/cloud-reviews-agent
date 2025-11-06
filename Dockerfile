@@ -1,10 +1,11 @@
 # Multi-stage build for optimized image size
-FROM python:3.11-slim AS base
+FROM python:3.12-slim AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    UV_SYSTEM_PYTHON=1
+    UV_SYSTEM_PYTHON=1 \
+    UV_PYTHON=python3.12
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -20,8 +21,8 @@ WORKDIR /app
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies
-RUN uv sync --frozen --no-dev
+# Install dependencies (force use of system Python)
+RUN uv sync --frozen --no-dev --python-preference only-system
 
 # Copy application code
 COPY app/ ./app/
