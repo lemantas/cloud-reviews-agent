@@ -1,6 +1,47 @@
+# Environment
 .env
+.env.*
+!.env.example
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Python
 .venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 app/__pycache__/
+*.egg-info/
+dist/
+build/
+
+# Data (large files - don't commit to git)
 data/chroma_db/
 data/sqlite.db
+
+# Backups
+backups/
+*.tar.gz
+
+# Docker
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
