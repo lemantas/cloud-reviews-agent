@@ -200,3 +200,165 @@ Agent Reasoning:
 - Domain-Aware: Understands cloud hosting business context
 
 The system transforms unstructured customer feedback into actionable business insights through the combination of modern AI retrieval, domain expertise, and intelligent analysis tools.
+
+
+## Limitations & Future Work
+
+### Current Limitations
+
+**1. Session-Based Token Constraints**
+- 100k token limit per session prevents analysis of extremely large datasets in a single conversation
+- No persistent conversation history across app restarts
+- Token tracking resets when session ends, even though it makes sense to give each registered used a limited pool of tokens
+
+**2. Single Model Provider**
+- Currently locked to OpenAI (GPT-4o-mini and text-embedding-3-small)
+- No fallback options if OpenAI API experiences downtime
+- Cost optimization limited to single provider's pricing structure
+- Cannot leverage strengths of different models (e.g., Claude for analysis, Gemini for summarization)
+
+**3. Static Knowledge Base**
+- Review data requires manual ingestion via CSV files
+- No real-time integration with Trustpilot or other review platforms
+- Cannot automatically update when new reviews are posted
+- Scraper (`scrape_reviews.py`) must be run manually
+- Scraper is custom-coded, even though there must be more robust open source scrapers already available 
+
+**4. No User Management**
+- No authentication or user accounts
+- Cannot save user preferences, favorite queries, or analysis history
+- All users share the same database and token pool
+- No personalization based on user role or industry
+
+**5. Performance Bottlenecks**
+- No caching mechanism for frequently asked queries
+- Every query triggers fresh vector search and LLM calls
+- Popular queries (e.g., "What are common complaints?") re-analyzed each time
+- Agent tool calls can be slow for complex multi-step reasoning
+- Tool outputs must be streamed to the user in real time, as one now needs to wait more than a minute to receive an answer.
+
+**6. Limited Feedback Loop**
+- No mechanism for users to rate response quality
+- Cannot learn which tool combinations work best for specific query types
+- No A/B testing for prompt variations
+- Manual prompt engineering required for improvements
+
+**7. Scalability Constraints**
+- Running on local machine or single Streamlit instance
+- No load balancing for multiple concurrent users
+- Vector database (Chroma) not optimized for distributed deployment
+- SQLite database single-threaded and not suitable for high-concurrency scenarios
+
+**9. Retrieval Limitations**
+- MMR parameters (TOP_K=12, FETCH_K=30) are hardcoded
+- No hybrid search (semantic + keyword BM25). Keyword search might suit aspects_analysis well.
+- Cannot handle queries requiring temporal analysis (e.g., "How has sentiment changed over time?"), nor put date restrictions.
+- Deduplication by review_id may miss important repeated mentions across reviews
+
+---
+
+### Future Enhancements
+
+#### **Near-Term Improvements (1-2 weeks)**
+
+**1. Enhanced User Experience**
+- [ ] Add LLM model selector dropdown (GPT-4o-mini, GPT-4o, Claude Sonnet)
+- [ ] Implement query caching with Redis for common questions (30-60s TTL)
+- [ ] Add "Save Analysis" button to export full conversation as PDF/Markdown
+- [ ] Create onboarding tutorial with interactive walkthrough
+
+**2. Retrieval Optimization**
+- [ ] Implement hybrid search (semantic embeddings + BM25 keyword matching)
+- [ ] Add temporal filtering (date range picker for review analysis)
+
+**3. Feedback & Learning**
+- [ ] Add thumbs up/down rating for each agent response
+- [ ] Store feedback in SQLite for prompt optimization analysis
+- [ ] A/B test different system prompts based on feedback scores
+
+#### **Mid-Term Enhancements (1-2 months)**
+
+**4. Multi-Model Support**
+- [ ] Add Anthropic Claude (Sonnet/Opus) for deeper analysis
+- [ ] Integrate Google Gemini as cost-effective alternative
+- [ ] Implement automatic failover if primary model is unavailable
+- [ ] Model routing: use GPT-4o-mini for simple Q&A, GPT-4o for complex reasoning
+
+**5. Real-Time Data Integration**
+- [ ] Build scheduled Trustpilot scraper (runs daily/weekly)
+- [ ] Add webhook support for real-time review ingestion
+- [ ] Implement incremental vector store updates (avoid full rebuild)
+- [ ] Add data freshness indicator in UI ("Last updated: 2 hours ago")
+
+**6. Advanced Analytics**
+- [ ] Temporal sentiment analysis (trend charts over time)
+- [ ] Comparative dashboards (vendor A vs vendor B side-by-side)
+- [ ] Topic modeling for discovering emergent themes
+- [ ] Anomaly detection for sudden sentiment shifts
+
+**7. User Management & Personalization**
+- [ ] Implement authentication (OAuth, email/password)
+- [ ] Save user query history and favorite analyses
+- [ ] Role-based access (Product Manager sees different defaults than Support team)
+- [ ] Personal knowledge (each user is able to put their goals into the system)
+
+#### **Long-Term Vision (3-6 months)**
+
+**8. Production Deployment**
+- [ ] Deploy to AWS/GCP/Azure with auto-scaling
+- [ ] Replace SQLite with PostgreSQL for concurrent access
+- [ ] Deploy Chroma on dedicated vector DB service (Pinecone, Weaviate, or Qdrant)
+- [ ] Implement CDN caching for static assets
+- [ ] Add monitoring with Prometheus + Grafana
+- [ ] Set up CI/CD pipeline with automated testing
+
+**9. Multi-Agent Workflows**
+- [ ] Specialist agents: Sentiment Specialist, Aspect Specialist, JTBD Specialist
+- [ ] Supervisor agent coordinates specialist agents for complex queries
+- [ ] Parallel tool execution for faster comparative analysis
+- [ ] Agent collaboration for multi-vendor deep dives
+
+**10. Domain Expansion**
+- [ ] Make aspect taxonomy configurable (upload custom aspect list)
+- [ ] Auto-detect domain from reviews (hospitality vs SaaS vs e-commerce)
+- [ ] Build domain adapter framework for easy vertical expansion
+- [ ] Create marketplace for pre-trained domain configurations
+
+**11. Advanced RAG Techniques**
+- [ ] Fine-tune embedding model on domain-specific reviews
+- [ ] Implement graph RAG for relationship discovery (e.g., "pricing complaints → churn risk")
+- [ ] Add citation verification (check if LLM claims match retrieved context)
+- [ ] Implement RAPTOR (recursive abstractive processing) for hierarchical summarization (perhaps with web search tool for home page analysis?; need pieces of content with broader context than reviews)
+
+**12. Intelligence Enhancements**
+- [ ] Implement retrieval-augmented fine-tuning (RAFT)
+- [ ] Add reasoning traces (show agent's thought process step-by-step)
+- [ ] Self-critique mechanism (agent reviews its own responses before showing user)
+
+---
+
+### Research & Experimental Ideas
+
+**1. Agentic Collaboration**
+- Multi-agent debate: two agents analyze same query, synthesize best answer
+- Human-in-the-loop: agent pauses to ask clarifying questions mid-analysis
+- Recursive analysis: agent generates follow-up questions and answers them autonomously
+
+**2. Advanced Evaluation**
+- Implement RAGAs framework for systematic quality measurement
+- Create golden dataset of query-answer pairs for regression testing
+- A/B test different chunking strategies (sentence vs full review)
+- Measure retrieval precision/recall with human-labeled relevance scores
+
+**3. Cost Optimization**
+- Prompt compression (reduce token usage without losing quality)
+- Intelligent caching with semantic similarity (cache similar queries, not just exact matches)
+- Batch processing for non-real-time queries
+- Model distillation: use smaller local open source model to mimic GPT-4o-mini behavior
+
+**4. Novel Features**
+- Compare user perception against vendor positioning to find company positioning gaps
+- "Ask Me Anything" mode: agent proactively suggests unexplored analysis angles
+- Competitive intelligence: auto-generate competitor comparison reports and send them via email
+- Predictive insights: "Based on trends, expect pricing complaints to increase"
+- Review response generator: draft responses to negative reviews using JTBD insights
