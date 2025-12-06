@@ -1,13 +1,13 @@
 from clients import get_vector_store
 
-# Configuration
+
 TOP_K = 12 # number of results to return
 FETCH_K = 30 # sconsider FETCH_K results, then diversify to TOP_K
 LAMBDA_MMR = 0.5 # 0 - 1 (0 = most diverse, 1 = most relevant)
 
 
 def create_retriever(query, chunk_type="sentence", vendor=None, top_k=None, fetch_k=None):
-    """Create a retriever with sentiment-aware filtering."""
+    """Dynamically create retrieval query."""
     vector_store = get_vector_store()
     filters = {"chunk_type": chunk_type}
     if vendor:
@@ -37,7 +37,7 @@ def retrieve_documents(question, chunk_type="sentence", vendor=None, top_k=TOP_K
     if not docs:
         return []
 
-    # Deduplication by review_id to avoid multiple chunks from the same review
+    # Deduplicate by review_id to avoid multiple chunks from the same review
     seen_review_ids = set()
     unique_docs = []
     for doc in docs:
@@ -63,13 +63,13 @@ def retrieve_documents(question, chunk_type="sentence", vendor=None, top_k=TOP_K
     return processed_docs
 
 def format_snippets_to_text(snippets):
-    """Format snippet objects to text for LLM context."""
+    """Format snippet objects to text for a simple RAG workflow."""
     if not snippets:
         return "No relevant reviews found."
 
     formatted = []
     for snippet in snippets:
-        source_line = f"{snippet['source']} | {snippet['date'] or 'Unknown date'}"
+        source_line = f"{snippet['source']} | {snippet['date'] or 'Unknown date'} | Score: {snippet['rating'] or 'N/A'}"
         formatted.append(f"[{source_line}] {snippet['text'].strip()}")
 
     return "\n\n".join(formatted)

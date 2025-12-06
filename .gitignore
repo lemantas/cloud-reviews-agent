@@ -23,6 +23,7 @@ build/
 # Data (large files - don't commit to git)
 data/chroma_db/
 data/sqlite.db
+data/*
 
 # Backups
 backups/
@@ -45,3 +46,6 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+tickets/
+.claude/

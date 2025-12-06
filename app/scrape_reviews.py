@@ -72,7 +72,6 @@ def _iter_pages(base_url, max_pages, delay, timeout):
             time.sleep(delay)
 
 def scrape_reviews_paginated(
-    # base_url="https://www.trustpilot.com/review/www.cherryservers.com",
     base_url="https://www.trustpilot.com/review/scaleway.com",
     max_pages=None,
     delay_seconds=2,

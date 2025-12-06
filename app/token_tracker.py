@@ -3,7 +3,6 @@ import streamlit as st
 from langchain_core.callbacks.base import BaseCallbackHandler
 
 class TokenTracker(BaseCallbackHandler):
-    """Simple token tracker for Streamlit + LangChain."""
 
     def __init__(self, max_tokens=100000):
         self.max_tokens = max_tokens
@@ -12,7 +11,7 @@ class TokenTracker(BaseCallbackHandler):
 
     def on_llm_end(self, response, **kwargs):
         """Auto-track tokens from LLM."""
-        if hasattr(response, 'llm_output') and response.llm_output:
+        if hasattr(response, 'llm_output'):
             tokens = response.llm_output.get('token_usage', {}).get('total_tokens', 0)
             st.session_state.tokens += tokens
 

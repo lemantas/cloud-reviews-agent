@@ -201,164 +201,134 @@ Agent Reasoning:
 
 The system transforms unstructured customer feedback into actionable business insights through the combination of modern AI retrieval, domain expertise, and intelligent analysis tools.
 
-
-## Limitations & Future Work
-
-### Current Limitations
-
-**1. Session-Based Token Constraints**
-- 100k token limit per session prevents analysis of extremely large datasets in a single conversation
-- No persistent conversation history across app restarts
-- Token tracking resets when session ends, even though it makes sense to give each registered used a limited pool of tokens
-
-**2. Single Model Provider**
-- Currently locked to OpenAI (GPT-4o-mini and text-embedding-3-small)
-- No fallback options if OpenAI API experiences downtime
-- Cost optimization limited to single provider's pricing structure
-- Cannot leverage strengths of different models (e.g., Claude for analysis, Gemini for summarization)
-
-**3. Static Knowledge Base**
-- Review data requires manual ingestion via CSV files
-- No real-time integration with Trustpilot or other review platforms
-- Cannot automatically update when new reviews are posted
-- Scraper (`scrape_reviews.py`) must be run manually
-- Scraper is custom-coded, even though there must be more robust open source scrapers already available 
-
-**4. No User Management**
-- No authentication or user accounts
-- Cannot save user preferences, favorite queries, or analysis history
-- All users share the same database and token pool
-- No personalization based on user role or industry
-
-**5. Performance Bottlenecks**
-- No caching mechanism for frequently asked queries
-- Every query triggers fresh vector search and LLM calls
-- Popular queries (e.g., "What are common complaints?") re-analyzed each time
-- Agent tool calls can be slow for complex multi-step reasoning
-- Tool outputs must be streamed to the user in real time, as one now needs to wait more than a minute to receive an answer.
-
-**6. Limited Feedback Loop**
-- No mechanism for users to rate response quality
-- Cannot learn which tool combinations work best for specific query types
-- No A/B testing for prompt variations
-- Manual prompt engineering required for improvements
-
-**7. Scalability Constraints**
-- Running on local machine or single Streamlit instance
-- No load balancing for multiple concurrent users
-- Vector database (Chroma) not optimized for distributed deployment
-- SQLite database single-threaded and not suitable for high-concurrency scenarios
-
-**9. Retrieval Limitations**
-- MMR parameters (TOP_K=12, FETCH_K=30) are hardcoded
-- No hybrid search (semantic + keyword BM25). Keyword search might suit aspects_analysis well.
-- Cannot handle queries requiring temporal analysis (e.g., "How has sentiment changed over time?"), nor put date restrictions.
-- Deduplication by review_id may miss important repeated mentions across reviews
-
 ---
 
-### Future Enhancements
+## Future Roadmap
 
-#### **Near-Term Improvements (1-2 weeks)**
+ 1. Code Quality & Maintainability
 
-**1. Enhanced User Experience**
-- [ ] Add LLM model selector dropdown (GPT-4o-mini, GPT-4o, Claude Sonnet)
-- [ ] Implement query caching with Redis for common questions (30-60s TTL)
-- [ ] Add "Save Analysis" button to export full conversation as PDF/Markdown
-- [ ] Create onboarding tutorial with interactive walkthrough
+  Priority: Low-Medium | Effort: Low
 
-**2. Retrieval Optimization**
-- [ ] Implement hybrid search (semantic embeddings + BM25 keyword matching)
-- [ ] Add temporal filtering (date range picker for review analysis)
+  - ✅ Make variable names more descriptive, eliminate unnecessary comments
+    - Clarification: Focus on complex logic in chains.py, retrieval.py, tools.py
+    - Recommendation: Do this incrementally during other refactors to avoid dedicated effort
+    - Impact: Moderate improvement in maintainability
 
-**3. Feedback & Learning**
-- [ ] Add thumbs up/down rating for each agent response
-- [ ] Store feedback in SQLite for prompt optimization analysis
-- [ ] A/B test different system prompts based on feedback scores
+  ---
+  2. Architecture Overhaul
 
-#### **Mid-Term Enhancements (1-2 months)**
+  Priority: Medium-High | Effort: High
 
-**4. Multi-Model Support**
-- [ ] Add Anthropic Claude (Sonnet/Opus) for deeper analysis
-- [ ] Integrate Google Gemini as cost-effective alternative
-- [ ] Implement automatic failover if primary model is unavailable
-- [ ] Model routing: use GPT-4o-mini for simple Q&A, GPT-4o for complex reasoning
+  - ✅ Refactor with LangGraph
+    - Clarification: Replace create_agent() with LangGraph's state machine for better control flow
+    - Benefits: Better observability, easier debugging, explicit state management
+    - Consideration: Breaking change - requires full rewrite of chains.py
+    - Recommendation: Do this BEFORE multi-agent work (LangGraph makes multi-agent easier)
+  - ✅ Refactor to web services + separate frontend
+    - Clarification:
+        - Backend: FastAPI REST API with agent execution endpoints
+      - Frontend: React/Vue SPA or keep Streamlit separate
+    - Benefits: Better scalability, independent deployment, API for other clients
+    - Consideration: Significantly increases complexity and deployment surface
+    - Recommendation: Only if you need API access or have multiple frontend clients
 
-**5. Real-Time Data Integration**
-- [ ] Build scheduled Trustpilot scraper (runs daily/weekly)
-- [ ] Add webhook support for real-time review ingestion
-- [ ] Implement incremental vector store updates (avoid full rebuild)
-- [ ] Add data freshness indicator in UI ("Last updated: 2 hours ago")
+  ---
+  3. User Experience Enhancements ✨
 
-**6. Advanced Analytics**
-- [ ] Temporal sentiment analysis (trend charts over time)
-- [ ] Comparative dashboards (vendor A vs vendor B side-by-side)
-- [ ] Topic modeling for discovering emergent themes
-- [ ] Anomaly detection for sudden sentiment shifts
+  Priority: High | Effort: Low-Medium
 
-**7. User Management & Personalization**
-- [ ] Implement authentication (OAuth, email/password)
-- [ ] Save user query history and favorite analyses
-- [ ] Role-based access (Product Manager sees different defaults than Support team)
-- [ ] Personal knowledge (each user is able to put their goals into the system)
+  - ✅ Stream LLM messages in real-time
+    - Clarification: Use stream() instead of invoke() in LangChain
+    - Benefits: Better perceived performance, users see progress
+    - Implementation: Streamlit has st.write_stream() for this
+    - Recommendation: HIGH PRIORITY - quick win with big UX impact
+  - ✅ Implement Evals (thumbs up/down rating)
+    - Clarification: User feedback on agent responses
+    - Answer to your question: YES, LangSmith supports feedback via SDK:
+    from langsmith import Client
+  client = Client()
+  client.create_feedback(run_id, key="user_score", score=1)  # 1=👍, 0=👎
+    - Recommendation: Add this early - feedback data informs future improvements
 
-#### **Long-Term Vision (3-6 months)**
+  ---
+  4. Tool & Integration Expansion 🔧
 
-**8. Production Deployment**
-- [ ] Deploy to AWS/GCP/Azure with auto-scaling
-- [ ] Replace SQLite with PostgreSQL for concurrent access
-- [ ] Deploy Chroma on dedicated vector DB service (Pinecone, Weaviate, or Qdrant)
-- [ ] Implement CDN caching for static assets
-- [ ] Add monitoring with Prometheus + Grafana
-- [ ] Set up CI/CD pipeline with automated testing
+  Priority: Medium | Effort: Low-Medium
 
-**9. Multi-Agent Workflows**
-- [ ] Specialist agents: Sentiment Specialist, Aspect Specialist, JTBD Specialist
-- [ ] Supervisor agent coordinates specialist agents for complex queries
-- [ ] Parallel tool execution for faster comparative analysis
-- [ ] Agent collaboration for multi-vendor deep dives
+  - ✅ Use MCP tools (web_search, etc.)
+    - Clarification: Which MCP tools? Suggestions:
+        - web_search - Lookup vendor incidents/news in real-time
+      - filesystem - Read/write reports locally
+      - time - For date-based queries
+    - Consideration: Each tool adds complexity to agent decision-making
+    - Recommendation: Add 1-2 tools max; more tools = worse tool selection accuracy
+  - ✅ Create review_response_generator tool
+    - Clarification: Generate vendor responses to negative reviews based on JTBD?
+    - Use case: "Write a response to this 2-star review about pricing"
+    - Recommendation: Good idea - naturally extends JTBD analysis
 
-**10. Domain Expansion**
-- [ ] Make aspect taxonomy configurable (upload custom aspect list)
-- [ ] Auto-detect domain from reviews (hospitality vs SaaS vs e-commerce)
-- [ ] Build domain adapter framework for easy vertical expansion
-- [ ] Create marketplace for pre-trained domain configurations
+  ---
+  5. Multi-Agent Architecture
 
-**11. Advanced RAG Techniques**
-- [ ] Fine-tune embedding model on domain-specific reviews
-- [ ] Implement graph RAG for relationship discovery (e.g., "pricing complaints → churn risk")
-- [ ] Add citation verification (check if LLM claims match retrieved context)
-- [ ] Implement RAPTOR (recursive abstractive processing) for hierarchical summarization (perhaps with web search tool for home page analysis?; need pieces of content with broader context than reviews)
+  Priority: Medium | Effort: Very High
 
-**12. Intelligence Enhancements**
-- [ ] Implement retrieval-augmented fine-tuning (RAFT)
-- [ ] Add reasoning traces (show agent's thought process step-by-step)
-- [ ] Self-critique mechanism (agent reviews its own responses before showing user)
+  Current ideas breakdown:
 
----
+  - ✅ Supervisor agent coordinates specialists
+    - Clarification: Manager decides which specialist(s) to consult
+    - Pattern: LangGraph's "supervisor" or "hierarchical" pattern
+    - Recommendation: IF you do multi-agent, use this pattern
+  - ✅ Parallel tool execution
+    - Clarification: Run sentiment + aspect + JTBD simultaneously
+    - Benefits: Faster comparative analysis (e.g., compare 3 vendors)
+    - Implementation: LangGraph's parallel edges or asyncio
+    - Recommendation: HIGH VALUE - significant speed improvement for comparisons
+  - ✅ Human-in-the-loop
+    - Clarification: Agent asks clarifying questions mid-execution
+    - Example: "Do you want performance aspects only, or all aspects?"
+    - Implementation: LangGraph interrupt() + Streamlit input
+    - Recommendation: MEDIUM PRIORITY - good for ambiguous queries
 
-### Research & Experimental Ideas
+  ---
+  6. Data Collection & Processing
 
-**1. Agentic Collaboration**
-- Multi-agent debate: two agents analyze same query, synthesize best answer
-- Human-in-the-loop: agent pauses to ask clarifying questions mid-analysis
-- Recursive analysis: agent generates follow-up questions and answers them autonomously
+  Priority: Medium | Effort: Medium
 
-**2. Advanced Evaluation**
-- Implement RAGAs framework for systematic quality measurement
-- Create golden dataset of query-answer pairs for regression testing
-- A/B test different chunking strategies (sentence vs full review)
-- Measure retrieval precision/recall with human-labeled relevance scores
+  - ✅ Automate Trustpilot scraping
+    - Clarification: Scheduled scraping? Trigger-based? Real-time?
+    - Options:
+        - Cron job / GitHub Actions daily
+      - Webhook on new review
+      - On-demand via Streamlit button
+    - Consideration: Trustpilot may rate-limit or block
+    - Recommendation: Start with simple scheduled job
+  - ✅ Date restrictions in ChromaDB queries
+    - Clarification: Filter by review date range (e.g., "reviews from last 6 months")
+    - Implementation: Add date to metadata filter in retrieval.py
+    - Recommendation: HIGH VALUE - enables trend analysis
+  - ✅ Vendor trends over time with monthly overviews
+    - Clarification: Time-series analysis of sentiment/aspects by month
+    - Dependencies: Requires date restrictions (above)
+    - Implementation: New tool or Streamlit dashboard with charts
+    - Recommendation: GREAT FEATURE - adds longitudinal insights
 
-**3. Cost Optimization**
-- Prompt compression (reduce token usage without losing quality)
-- Intelligent caching with semantic similarity (cache similar queries, not just exact matches)
-- Batch processing for non-real-time queries
-- Model distillation: use smaller local open source model to mimic GPT-4o-mini behavior
-
-**4. Novel Features**
-- Compare user perception against vendor positioning to find company positioning gaps
-- "Ask Me Anything" mode: agent proactively suggests unexplored analysis angles
-- Competitive intelligence: auto-generate competitor comparison reports and send them via email
-- Predictive insights: "Based on trends, expect pricing complaints to increase"
-- Review response generator: draft responses to negative reviews using JTBD insights
+## My Summary List of Future Features
+What I would like for the capstone project:
+- Make code variable names more descriptive, and eliminate code comments, where possible. Only use code comments where really necessary.
+- Refactor architecture with LangGraph
+- Stream LLM messages in real-time
+- Refactor the app based on web services, and create separate front-end
+- Use a few new MCP tools like web_search, and others that make sense here.
+- Build multi-agent architecture. Possible ideas:
+    - Specialist agents: Sentiment Specialist, Aspect Specialist, JTBD Specialist
+    -  Supervisor agent coordinates specialist agents for complex queries
+    - Parallel tool execution for faster comparative analysis
+    - Agent collaboration for multi-vendor deep dives
+    - Multi-agent debate: two agents analyze same query, synthesize best answer
+    - Human-in-the-loop: agent pauses to ask clarifying questions mid-analysis
+- Automate Trustpilot scraping
+- Implement Evals (thumbs up/down rating; can this be saved in LangSmith?)
+- Implement date restrictions when querying ChromaDB
+- Implement Vendor review trends over time with monthly overviews and mean scores
+- Authentication and long-term memory
+- Create review_response_generator tool based on JTBD analysis.

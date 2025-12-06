@@ -80,7 +80,7 @@ def create_hybrid_documents(df):
         )
         all_docs.append(full_doc)
 
-        # 2) Sentence-level chunks from body (if exists and non-trivial)
+        # 2) Sentence-level documents from body (if exists and non-trivial)
         if body and len(body.split()) > 5:  # Only chunk non-trivial bodies
             try:
                 sentences = nltk.sent_tokenize(body)
@@ -94,7 +94,7 @@ def create_hybrid_documents(df):
                                 "chunk_level": "sentence",
                                 "parent_id": review_id,
                                 "sentence_idx": i,
-                                "review_header": header  # Keep header for context
+                                "review_header": header
                             }
                         )
                         all_docs.append(sentence_doc)

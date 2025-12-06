@@ -1,290 +1,218 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
+
+## 📋 CLAUDE.md Guidelines
+
+**What to include in this file:**
+1. **Architecture mental model** - How data flows through the system
+2. **Key patterns and constraints** - What to follow when making changes
+3. **Domain context** - Vendors, tools, specialized terminology
+4. **Essential commands** - How to run/test/deploy
+5. **File organization** - Where to find things quickly
+6. **Technology stack** - What libraries and why
+
+**What NOT to include:**
+- Implementation details with line numbers (read the actual code instead)
+- Example conversations or UI walkthroughs (discoverable via testing)
+- Verbose descriptions of every feature (let code and docstrings speak)
+- Redundant information already clear from code structure
+
+---
 
 ## Project Overview
 
-This is an Agentic RAG (Retrieval-Augmented Generation) application for analyzing customer reviews with intelligent, LLM-driven tool selection. The project specializes in cloud hosting provider reviews and implements a complete agentic pipeline where the LLM autonomously decides which analysis tools to invoke based on user queries. The system supports multi-step reasoning with domain-specific tools for sentiment analysis, aspect extraction, Jobs-to-Be-Done (JTBD) analysis, and dynamic retrieval.
+Agentic RAG application for analyzing cloud hosting provider reviews. The LLM autonomously selects and chains analysis tools (sentiment, aspect extraction, JTBD) based on user queries. Supports multi-step reasoning with dynamic retrieval and conversational memory.
 
 ## Architecture
 
-**Data Flow:**
-- **Ingestion:** Raw CSV reviews → SQLite database (OLTP) → Chunked documents → Chroma vector store
-- **Chunking:** Two-level strategy (review-level: title + body; sentence-level: individual sentences with parent_id)
-- **Retrieval:** MMR (Maximal Marginal Relevance) with metadata filtering (vendor, chunk_type) and deduplication by review_id
-- **Agentic Flow:** User query → Initial retrieval → Agent creation → LLM-driven tool selection → Tool execution (may include additional retrieval) → Response synthesis
+### Data Flow
+```
+CSV reviews → SQLite (OLTP) → Chunked docs → Chroma (vector store)
+                                     ↓
+User query → Agent → LLM selects tools → Tool execution → Response synthesis
+```
 
-**Core Components:**
-- `app/scrape_reviews.py` - Web scraper for Trustpilot reviews (Trustpilot --> CSV)
-- `app/ingest.py` - Data ingestion pipeline (CSV --> SQLite --> vector indexing)
-- `app/clients.py` - Lazy-loaded database connections (LLM, embeddings, vector store) with callback support
-- `app/retrieval.py` - Document retrieval with MMR, deduplication by review_id, and metadata processing
-- `app/tools.py` - LangChain tool definitions (4 tools: sentiment_analysis, aspect_extraction, jtbd_analysis, retrieve_reviews) - all using LLM with structured output returning JSON
-- `app/models.py` - Pydantic schemas for structured I/O (Sentiment, AspectAnalysis, JTBD, Snippet, RetrievalResult, RetrievalInput, ToolInput)
-- `app/prompts.py` - Prompt template loaders and constructors
-- `data/prompts/` - External prompt files (rag_system.txt, agent_system.txt, sentiment_analysis.txt, aspects_analysis.txt, jtbd_analysis.txt)
-- `app/chains.py` - Agentic RAG implementation using LangChain's create_agent() with LLM-driven tool selection (simple_rag_response, agentic_response)
-- `app/token_tracker.py` - Session-scoped token tracking and rate limiting
-- `app/app.py` - Streamlit UI with tool output formatting and real-time token usage display
+### Chunking Strategy
+- **Review-level:** One chunk per review (title + body)
+- **Sentence-level:** Individual sentences with parent_id linking back to review
+- **Deduplication:** By review_id to avoid duplicate chunks from same review
 
-**Technology Stack:**
-- **Package Manager:** uv (modern Python package manager)
-- **Vector DB:** Chroma with persistent client
-- **Chunking:** NLTK sentence tokenization for two-level chunking
-- **OLTP DB:** SQLite for structured review data
-- **Embeddings:** OpenAI text-embedding-3-small
-- **LLM:** GPT-4o-mini (temperature=0.2) for agentic reasoning and structured output - switched for faster responses
-- **Framework:** LangChain with Agents API (`create_agent()`) for autonomous tool selection
-- **UI:** Streamlit with session state management and real-time token tracking
+### Agent Architecture
+Uses **LangGraph** (state graph) for autonomous tool selection and transparent execution:
+
+**Graph Structure:**
+- **Entry point:** `agent` node (LLM reasoning with tools bound)
+- **Conditional routing:** `should_continue()` checks for tool calls
+- **Tool execution:** `tools` node executes requested tools
+- **Loop back:** Tools → Agent for multi-step reasoning
+- **State management:** AgentState TypedDict with messages, tool_outputs, snippets
+- **Checkpointing:** SQLite-based conversation persistence via thread_id
+
+**Execution Flow:**
+1. User query enters as HumanMessage
+2. Agent node: LLM decides which tools to invoke
+3. If tool calls exist, route to tools node
+4. Tools node: Execute tools, track outputs and snippets
+5. Loop back to agent node for response synthesis
+6. End when no more tool calls
+
+**Key Pattern:** Agent typically calls `retrieve_reviews` first, then analysis tools as needed.
+
+**Migration Note:** Previously used LangChain's deprecated `create_agent()`. Now uses LangGraph for better control flow, built-in persistence, and transparent debugging.
+
+### Retrieval (MMR)
+- TOP_K=12, FETCH_K=30, LAMBDA_MMR=0.5
+- Metadata filtering by vendor and chunk_type
+- Deduplication by review_id
+
+## Technology Stack
+
+- **Python 3.12** (required for library compatibility)
+- **uv** - Modern package manager (replaces pip/poetry)
+- **LangGraph** - State graph framework for agentic workflows with built-in checkpointing
+- **LangChain** - Core abstractions for LLMs and tools
+- **Chroma** - Vector database with persistent storage
+- **SQLite** - Structured review data (OLTP) + agent checkpoints
+- **OpenAI** - text-embedding-3-small + GPT-4o-mini (temp=0.2)
+- **Streamlit** - UI with session state management
+- **Docker** - Containerized deployment with volume persistence
 
 ## Development Commands
 
-### Environment Setup
+### Setup
 ```bash
-# Install dependencies using uv (automatically manages virtual environment)
+# Install dependencies
 uv sync
 
-# Set up environment variables
-cp .env.example .env  # Create .env file with your OPENAI_API_KEY
+# Configure environment
+cp .env.example .env  # Add your OPENAI_API_KEY
 
-# Note: uv automatically creates and manages a .venv/ directory
-# No need to manually activate - use 'uv run' prefix for commands
+# Note: uv auto-manages .venv/ - use 'uv run' prefix for commands
 ```
+
+**Required:** `OPENAI_API_KEY`
+**Optional:** `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT` (for LangSmith tracing)
 
 ### Data Ingestion
 ```bash
-# Run the ingestion pipeline to process CSV data
+# Process CSV → SQLite → Chroma vector index
 uv run python app/ingest.py
-
-# The process:
-# 1. Loads data/reviews/*.csv
-# 2. Creates SQLite database (data/sqlite.db)
-# 3. Generates review-level and sentence-level chunks
-# 4. Indexes chunks in Chroma vector store (data/chroma_db/)
 ```
 
-### Running the Application
+### Running Locally
 ```bash
-# Start the Streamlit UI
 uv run streamlit run app/app.py
-
-# The app provides:
-# - Text input for customer review queries
-# - Two analysis modes:
-#   1. Simple Q&A: Direct RAG without tools (fast responses using rag_chain)
-#   2. Agent Mode: LLM-driven tool selection with autonomous multi-step reasoning
-# - Sidebar filters (cloud provider, chunk type, MMR parameters)
-# - Real-time token usage tracking with progress bar and warnings
-# - Tool outputs displayed as formatted sections (sentiment, aspects, JTBD)
-# - Retrieved context with source citations and metadata (rating, date, vendor, review_header)
-# - CSV export of results with full metadata
+# Access at http://localhost:8501
 ```
+
+### Docker Deployment
+```bash
+# Recommended: Docker Compose
+docker-compose up --build
+
+# Manual Docker
+docker build -t agentic-rag .
+docker run -p 8501:8501 \
+  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  -v $(pwd)/data:/app/data \
+  agentic-rag
+```
+
+**Docker notes:** Python 3.12-slim base, health checks on `/_stcore/health`, data persisted via volume mounts
 
 ### Web Scraping
 ```bash
-# Scrape reviews from Trustpilot
 uv run python app/scrape_reviews.py
-
-# Outputs: reviews.csv with columns:
-# name, country, date, review_header, review_body
+# Outputs: reviews.csv (name, country, date, review_header, review_body)
 ```
 
-## Key Implementation Details
+## Key Implementation Patterns
 
-### Chunking Strategy
-- **Primary chunks:** One per review (title + body), level="review"
-- **Mini chunks:** Sentence-level from body text, level="sentence" with parent_id metadata
-- **Metadata:** name, country, date, score, vendor, review_id, chunk_type, chunk_level, parent_id, sentence_id, review_header
-- **IDs:** Deterministic format: `{review_id}_s{i}` for sentence chunks
+### Agentic Tools (4 total)
+All tools use LLM with structured output (Pydantic validation):
 
-### Agentic Tools
-The system implements four LangChain tools that the agent can autonomously invoke. All analysis tools use LLM-based structured output with Pydantic validation:
+1. **sentiment_analysis** - Analyzes overall sentiment, ratings, themes (returns Sentiment model)
+2. **aspect_extraction** - Identifies product features with frequency/sentiment (returns AspectAnalysis model)
+3. **jtbd_analysis** - Extracts Jobs-to-Be-Done patterns (returns JTBD model)
+4. **retrieve_reviews** - Dynamically fetches snippets from Chroma (returns RetrievalResult model)
 
-1. **sentiment_analysis** (`@tool` decorator with ToolInput schema)
-   - Analyzes overall sentiment, mean rating, positive/negative share and emotional themes
-   - Returns: Sentiment model (total_reviews, mean_rating, positive_share, negative_share, positive_themes, negative_themes)
-   - Input: List of snippets + user question
-
-2. **aspect_extraction** (`@tool` decorator with ToolInput schema)
-   - Identifies and ranks product aspects with frequency, sentiment scores, and example quotes
-   - Returns: AspectAnalysis model (total_aspects, aspects list with name, frequency, sentiment_score, examples)
-   - Input: List of snippets + user question
-
-3. **jtbd_analysis** (`@tool` decorator with ToolInput schema)
-   - Extracts Jobs-to-Be-Done patterns: job, situation, motivation, expected outcomes, frustrations
-   - Returns: JTBD model with supporting quotes and total reviews analyzed
-   - Input: List of snippets + user question
-
-4. **retrieve_reviews** (`@tool` decorator with RetrievalInput schema)
-   - Dynamically retrieves relevant review snippets from ChromaDB vector store
-   - Enables multi-step reasoning: agent can retrieve → analyze → retrieve again with different parameters
-   - Returns: RetrievalResult model (snippets list, count)
-   - Input: question, chunk_type (sentence/review), vendor filter, top_k, fetch_k
-   - Features: Deduplication by review_id, metadata normalization (text, rating, date, source, vendor, review_header)
-
-**Tool Efficiency Guidelines:**
-- Each analysis tool (sentiment, aspect, JTBD) includes docstring instruction: "Do not call this tool more than once unless you retrieved new snippets"
-- Prevents redundant LLM calls on identical data
-- Agent encouraged to retrieve → analyze → retrieve new data → analyze again (not analyze same data twice)
-- Supports multi-tool calls when analyzing different datasets (e.g., comparing vendors)
-
-### Agentic Architecture (LLM-Driven Tool Selection)
-The system uses **LangChain's create_agent()** framework for autonomous tool selection and multi-step reasoning:
-
-**Agent Implementation (`agentic_response` in chains.py:43-116):**
-1. Initial retrieval with `retrieve_documents()` to check for relevant reviews
-2. **Conversation History Processing:** Filters session history to include only user/assistant messages (strips tool outputs to reduce tokens)
-3. If reviews found, creates agent with:
-   - Model: GPT-4o-mini from `get_llm()`
-   - Tools: `[summarize_sentiment, extract_top_aspects, infer_jtbd, retrieve_reviews]`
-   - System prompt: Agent-specific instructions from `agent_system.txt`
-4. Agent invoked with conversation history + current user message via Agents API
-5. LLM autonomously decides which tools to call based on:
-   - User question intent
-   - Tool descriptions and docstrings
-   - Current context and previous tool outputs
-   - Previous conversation context (enables follow-up understanding)
-6. Tool outputs collected from ToolMessage entries in message history
-7. Final response synthesized from last AI message, preserving conversational context
-
-**Key Features:**
-- No manual keyword routing - LLM decides tool selection
-- Multi-step reasoning: Agent can call `retrieve_reviews` multiple times with different parameters
-- Handles ambiguous queries intelligently (e.g., "analyze Scaleway" → agent may choose all 3 analysis tools)
-- Natural conversation flow with tool chaining
-
-**MMR Retrieval Configuration:**
-- TOP_K=12 (results returned)
-- FETCH_K=30 (candidates before diversification)
-- LAMBDA_MMR=0.5 (0=most diverse, 1=most relevant)
-- Deduplication by review_id to avoid duplicate chunks from same review
+**Efficiency rule:** Analysis tools include docstring: "Do not call this tool more than once unless you retrieved new snippets"
 
 ### Conversational Memory
-The system implements full conversation history tracking for context-aware interactions:
+- **LangGraph checkpointing** - Automatic conversation persistence via SQLite
+- **Thread-based** - Each Streamlit session gets unique thread_id for checkpoint isolation
+- **Streamlit session state** - Stores conversation for UI display (synced with checkpoints)
+- **Persistent across restarts** - Conversations survive app restarts via checkpoint DB
+- Enables follow-up questions and pronoun resolution
 
-**Implementation (`agentic_response` in chains.py:54-90 and app.py:95-97, 292-311):**
-- **Session State:** Streamlit session state stores complete conversation history across turns
-- **Message Filtering:** Before passing to agent, strips tool outputs and metadata to reduce token usage
-- **Context Preservation:** Agent receives previous user/assistant messages for multi-turn understanding
-- **History Format:** List of dictionaries with `role` (user/assistant) and `content` keys
-- **Benefits:** Enables follow-up questions, pronoun resolution, and iterative refinement
+### Multi-Tool Support
+- Agent can call same tool multiple times with different parameters (e.g., compare vendors)
+- Tool outputs stored as list to preserve order
+- UI displays numbered instances ("Sentiment Analysis #1", "#2")
 
-**Example Flow:**
-1. User: "What do customers say about Scaleway?"
-2. Agent: [provides analysis]
-3. User: "How does that compare to OVH?" ← Agent understands "that" refers to Scaleway analysis
-4. Agent: [retrieves OVH data and provides comparison]
-
-### Multi-Tool Call Support
-The agent can invoke the same tool multiple times with different parameters for comprehensive analysis:
-
-**Implementation (app/chains.py:102-133 and app/app.py:186-210):**
-- **Tool Output Storage:** Stored as list (not dict) to preserve multiple calls and their order
-- **UI Display:** Numbered instances for repeated tools (e.g., "Sentiment Analysis #1", "Sentiment Analysis #2")
-- **Use Cases:**
-  - Compare sentiment across multiple vendors (retrieve + analyze each separately)
-  - Analyze different aspect categories in sequence
-  - Iterative retrieval with refined parameters
-- **Token Efficiency:** Each tool docstring includes "Do not call this tool more than once unless you retrieved new snippets" to prevent redundant analysis
-
-**Example Agent Reasoning:**
-```
-User: "Compare pricing sentiment between OVH and Scaleway"
-→ Agent calls: retrieve_reviews(vendor="ovh", question="pricing")
-→ Agent calls: sentiment_analysis(snippets=[ovh_reviews])
-→ Agent calls: retrieve_reviews(vendor="scaleway", question="pricing")
-→ Agent calls: sentiment_analysis(snippets=[scaleway_reviews])
-→ Agent synthesizes comparison
-```
-
-### Database Statistics
-Real-time vendor breakdown display in the Streamlit UI sidebar:
-
-**Implementation (app/clients.py:63-86 and app/app.py:242-260):**
-- **Function:** `get_review_stats()` queries SQLite database for vendor counts
-- **Display Format:**
-  ```
-  📊 Database Statistics
-  Total Reviews: 12,345
-
-  - cherry_servers: 1,234 (10.0%)
-  - digital_ocean: 2,345 (19.0%)
-  - hetzner: 3,456 (28.0%)
-  - ovh: 2,234 (18.1%)
-  - scaleway: 1,876 (15.2%)
-  - vultr: 1,200 (9.7%)
-  ```
-- **Benefits:** Users can see data coverage before querying, understand vendor representation
-
-### Additional UI Features
-Streamlit interface includes several usability enhancements:
-
-**Clear Conversation Button (app/app.py:110-113):**
-- Resets conversation history to empty list
-- Reinitializes TokenTracker to reset token count
-- Allows users to start fresh without reloading the app
-
-**Example Questions (app/app.py:227-239):**
-- Four clickable demo questions for quick exploration
-- Examples: "What are the main pain points?", "Compare support quality", "Analyze pricing sentiment"
-- One-click population of query input field
-
-**Message Count Display (app/app.py:176):**
-- Shows number of conversation turns in sidebar
-- Format: "💬 Messages: 5"
-- Helps users track conversation depth
-
-**Tool Output Expanders (app/app.py:184-210):**
-- Collapsible sections for each tool result
-- Automatically handles multiple calls with numbering
-- Example: "🔍 Sentiment Analysis #1", "🔍 Sentiment Analysis #2"
-- Preserves clean interface while showing comprehensive results
-
-### Security Considerations
-- Prompt injection protection (treat review text as untrusted data)
-- Environment variable management for API keys
-
-## File Structure Context
-
-### Data Files
-- `data/sqlite.db` - SQLite database with structured review data
-- `data/chroma_db/` - Persisted Chroma vector store
-- `data/reviews/` - Sample review data for ingestion
-
-### Configuration
-- `.env` - Environment variables (API keys, tracing settings)
-- `pyproject.toml` - Project metadata and dependencies
-- `uv.lock` - Locked dependency versions
-
-### Prompts
-- `data/prompts/rag_system.txt` - System prompt for simple RAG mode (focus on citations and evidence)
-- `data/prompts/agent_system.txt` - Agent system prompt with tool selection guidance and multi-step reasoning instructions
-- `data/prompts/sentiment_analysis.txt` - Structured output prompt for sentiment analysis tool (Sentiment model)
-- `data/prompts/aspects_analysis.txt` - Structured output prompt for aspect extraction tool (AspectAnalysis model)
-- `data/prompts/jtbd_analysis.txt` - Structured output prompt for JTBD analysis tool (JTBD model)
-- Note: `tool_selection_system.txt` has been removed (replaced by agent-native tool selection)
-
-### Development Files
-- `.env` - Environment variables for local development
-- `.venv/` - Virtual environment managed by uv (excluded from version control)
+### Token Tracking
+- Session-scoped limit: 100k tokens
+- Real-time display with progress bar
+- Blocks execution when limit exceeded
+- Implemented via callback in `app/token_tracker.py`
 
 ## Domain Specialization
 
-The application is specialized for cloud hosting provider reviews with:
-- **Supported Vendors:** cherry_servers, ovh, hetzner, digital_ocean, scaleway, vultr
-- **Aspect Taxonomy:** performance, pricing, support, reliability, setup, features, documentation, interface
-- **Citation Format:** `[source | YYYY-MM-DD]` with metadata (rating, vendor, review_header)
-- **Focus:** IaaS/bare-metal hosting customer insights with structured sentiment, aspect, and JTBD analysis
-- **Agent Intelligence:** LLM understands domain context and selects appropriate tools based on query intent (e.g., pricing questions → aspect_extraction, satisfaction questions → sentiment_analysis, motivations → jtbd_analysis)
+**Supported Vendors:** cherry_servers, ovh, hetzner, digital_ocean, scaleway, vultr
 
-## Monitoring and Evaluation
+**Aspect Taxonomy:** performance, pricing, support, reliability, setup, features, documentation, interface
 
-- **LangSmith integration** for tracing agent execution and tool calls (set LANGCHAIN_TRACING_V2=1)
-- **Token Tracking:** Session-scoped tracking via TokenTracker callback (100k token limit per session)
-  - Real-time usage display in sidebar with progress bar
-  - Warning when 90% limit reached
-  - Prevents execution when limit exceeded
-  - Message count displayed to track conversation length
-- **RAG framework** for RAG evaluation (Answer Faithfulness, Context Precision/Recall)
-- **Error handling** with user-friendly messages in Streamlit UI
-- **Rate limiting** and retry policies for API calls (max_retries=3 for LLM and embeddings)
+**Agent Intelligence:** LLM understands domain context and selects tools based on query type:
+- Pricing/features → aspect_extraction
+- Satisfaction/ratings → sentiment_analysis
+- Motivations/goals → jtbd_analysis
+
+## File Organization
+
+### Core Application
+- `app/app.py` - Streamlit UI with session management and thread_id tracking
+- `app/graph.py` - LangGraph state graph definition (AgentState, nodes, routing)
+- `app/chains.py` - Orchestration layer (`agentic_response`, `simple_rag_response`)
+- `app/tools.py` - LangChain tool definitions with structured output
+- `app/models.py` - Pydantic schemas (Sentiment, AspectAnalysis, JTBD, Snippet, etc.)
+- `app/retrieval.py` - MMR retrieval with deduplication
+- `app/clients.py` - Lazy-loaded LLM/embeddings/vector store connections
+- `app/prompts.py` - Prompt template loaders
+- `app/token_tracker.py` - Token tracking callback
+- `app/ingest.py` - Data ingestion pipeline
+- `app/scrape_reviews.py` - Trustpilot web scraper
+
+### Data & Config
+- `data/prompts/*.txt` - External prompt files (rag_system, agent_system, sentiment_analysis, aspects_analysis, jtbd_analysis)
+- `data/reviews/*.csv` - Sample review data
+- `data/sqlite.db` - SQLite database for reviews (gitignored)
+- `data/agent_checkpoints.db` - LangGraph conversation checkpoints (gitignored)
+- `data/chroma_db/` - Chroma vector store (gitignored)
+- `.env` - Environment variables (gitignored)
+- `Dockerfile`, `docker-compose.yml` - Container configuration
+
+### Configuration
+- `pyproject.toml` - Project metadata and dependencies
+- `uv.lock` - Locked dependency versions
+
+## Development Constraints
+
+### When Making Changes
+1. **Maintain agentic pattern** - Let LLM decide tool selection, avoid hardcoded routing
+2. **Use structured output** - All analysis tools return Pydantic models, not raw strings
+3. **Preserve conversation context** - LangGraph checkpointing handles conversation persistence via thread_id
+4. **Respect token limits** - Session capped at 100k tokens
+5. **Handle tool outputs as lists** - Support multiple calls to same tool
+6. **LangGraph state patterns** - Update state via partial dict returns in nodes, use reducers for accumulation
+7. **Python 3.12 required** - Docker and dependencies require this version
+
+### Testing
+- Use LangSmith tracing to debug agent reasoning (set `LANGCHAIN_TRACING_V2=true`)
+- Test with example questions in UI
+- Verify token tracking doesn't block legitimate usage
+
+### Deployment
+- Data persistence requires volume mounts for `data/` directory
+- Health checks ensure Streamlit is responsive
+- Environment variables must include OPENAI_API_KEY minimum

@@ -20,7 +20,7 @@ _llm = None
 _callbacks = []
 
 def set_callbacks(callbacks):
-    """Set callbacks for LLM tracking."""
+    """Set callbacks for LLM token tracking."""
     global _callbacks
     _callbacks = callbacks
 
@@ -61,12 +61,7 @@ def get_llm():
     return _llm
 
 def get_review_stats():
-    """Query SQLite database to get review counts grouped by vendor.
-
-    Returns:
-        dict: Dictionary with vendor names as keys and review counts as values.
-              Returns empty dict if database doesn't exist or query fails.
-    """
+    """Query SQLite database to get review counts grouped by vendor."""
     try:
         if not SQLITE_PATH.exists():
             return {}
