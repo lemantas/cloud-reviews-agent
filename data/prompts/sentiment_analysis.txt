@@ -30,7 +30,6 @@ You must interpret both quantitative ratings and qualitative language tone to su
 - negative_share: % of reviews classified as negative (rounded to 1 decimal).
 
 4. Extract Human-Readable Themes
-- Identify up to 5 recurring themes or short phrases from positive reviews.
 - Identify up to 5 recurring themes or short phrases from negative reviews.
 - Themes should be concise (1–4 words), descriptive, and suitable for reporting (e.g., “customer support quality”, “pricing transparency”, “server speed”, “dashboard usability”).
 - Group similar ideas together (e.g., “support team” and “helpdesk” → “customer support”).
