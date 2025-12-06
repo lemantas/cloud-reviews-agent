@@ -5,6 +5,7 @@ import sqlite3
 from langchain_core.messages import BaseMessage, SystemMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from clients import get_llm
@@ -56,7 +57,6 @@ def agent_node(state: AgentState) -> dict:
         tools = [summarize_sentiment, extract_top_aspects, infer_jtbd, retrieve_reviews]
         model = llm.bind_tools(tools)
 
-        # Get current messages
         messages = list(state["messages"])
 
         # Add system prompt if this is the first turn (no SystemMessage exists)
@@ -98,7 +98,6 @@ def tools_node(state: AgentState) -> dict:
         if not tool_calls:
             return {"messages": []}
 
-        # Create tools dictionary for lookup
         tools_dict = {
             "sentiment_analysis": summarize_sentiment,
             "aspect_extraction": extract_top_aspects,
@@ -122,7 +121,6 @@ def tools_node(state: AgentState) -> dict:
                 ))
                 continue
 
-            # Execute tool
             try:
                 result = tool_func.invoke(call["args"])
 
@@ -132,7 +130,6 @@ def tools_node(state: AgentState) -> dict:
                 else:
                     content_str = str(result)
 
-                # Create tool message for LLM
                 tool_messages.append(ToolMessage(
                     tool_call_id=call["id"],
                     content=content_str,
@@ -141,11 +138,9 @@ def tools_node(state: AgentState) -> dict:
 
                 # Track outputs for UI
                 if tool_name == "retrieve_reviews" and isinstance(result, dict):
-                    # Extract snippets from retrieve_reviews
                     if "snippets" in result:
                         new_snippets.extend(result["snippets"])
                 elif tool_name in ["sentiment_analysis", "aspect_extraction", "jtbd_analysis"]:
-                    # Track analysis tool outputs
                     new_tool_outputs.append({"name": tool_name, "output": result})
 
             except Exception as e:
@@ -190,7 +185,7 @@ def should_continue(state: AgentState) -> str:
     return "end"
 
 
-def create_agent_graph():
+def create_agent_graph() -> CompiledStateGraph:
     """Create and compile the agent workflow graph.
 
     This function builds the LangGraph workflow with:
@@ -202,14 +197,11 @@ def create_agent_graph():
     Returns:
         Compiled graph with checkpointing enabled
     """
-    # Create workflow
     workflow = StateGraph(AgentState)
 
-    # Add nodes
     workflow.add_node("agent", agent_node)
     workflow.add_node("tools", tools_node)
 
-    # Set entry point
     workflow.set_entry_point("agent")
 
     # Add conditional edges from agent
@@ -238,7 +230,7 @@ def create_agent_graph():
 _agent_graph = None
 
 
-def get_agent_graph():
+def get_agent_graph() -> CompiledStateGraph:
     """Get or create the compiled agent graph.
 
     Uses singleton pattern to avoid recompiling the graph on every request.

@@ -1,3 +1,4 @@
+from typing import List, Dict, Any, Union
 from langchain.tools import tool
 from clients import get_llm
 from prompts import get_jtbd_prompt, get_aspects_prompt, get_sentiment_prompt
@@ -6,13 +7,19 @@ from retrieval import retrieve_documents
 import json
 
 
-def _normalize_snippets(snippets):
+def _normalize_snippets(snippets: Union[List[str], List[Dict[str, Any]], List[Any]]) -> List[Dict[str, Any]]:
     """Normalize snippet inputs to a uniform list of dicts with keys 'text' and 'rating'.
 
     - Accepts a list of strings or dicts; ignores empty/invalid items
     - For strings: maps to {"text": <str>, "rating": None}
     - For dicts: preserves 'text' and 'rating' if available
     - For Pydantic models (e.g., Snippet), uses model_dump()
+
+    Args:
+        snippets: Mixed list of strings, dicts, or Pydantic models
+
+    Returns:
+        Normalized list of dictionaries with 'text' and 'rating' keys
     """
     normalized = []
     if not isinstance(snippets, list):
