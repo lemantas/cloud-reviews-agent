@@ -46,7 +46,7 @@ class ToolInput(BaseModel):
     question: str = Field(..., description="Question to analyze the snippets for")
 
 class Sentiment(BaseModel):
-    """Sentiment analysis summary of reviews."""
+    """Complete sentiment analysis result from reviews."""
     total_reviews: int = Field(0, description="Total number of reviews analyzed")
     mean_rating: Optional[float] = Field(None, description="Average rating score")
     positive_share: Optional[float] = Field(None, description="Percentage of positive reviews (rating >= 4)")
@@ -55,7 +55,7 @@ class Sentiment(BaseModel):
     negative_themes: List[str] = Field(default_factory=list, description="Top negative themes/quotes")
 
 class Aspect(BaseModel):
-    """A single product/service aspect mentioned in reviews."""
+    """A single product/service aspect analysed from reviews."""
     name: str = Field(description="Name of the aspect (e.g., 'performance', 'pricing')")
     frequency: int = Field(description="Number of times mentioned")
     sentiment_score: Optional[float] = Field(None, description="Average sentiment score for this aspect")
@@ -64,12 +64,12 @@ class Aspect(BaseModel):
     negative_examples: List[str] = Field(default_factory=list, description="Negative mentions")
 
 class AspectAnalysis(BaseModel):
-    """Complete aspect analysis results from reviews."""
+    """Complete aspect analysis results from a list of aspects from reviews."""
     total_aspects: int = Field(description="Total number of aspects found")
     aspects: List[Aspect] = Field(description="List of analyzed aspects with details")
 
 class JTBD(BaseModel):
-    """Jobs-to-Be-Done insight from customer reviews."""
+    """Complete Jobs-to-Be-Done analysis result from reviews."""
     job: str = Field(description="The functional job customers are trying to accomplish")
     situation: str = Field(description="The context/situation when this job arises")
     motivation: str = Field(description="Why customers want to accomplish this job")

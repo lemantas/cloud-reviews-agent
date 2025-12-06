@@ -4,8 +4,9 @@ from datetime import datetime
 from chains import agentic_response, simple_rag_response
 from clients import get_vector_store, set_callbacks, get_review_stats
 from token_tracker import TokenTracker
+import uuid
 
-# Formatting functions for tool outputs
+
 def format_sentiment_analysis(data):
     """Format sentiment analysis JSON data for display."""
     if "error" in data:
@@ -81,7 +82,7 @@ def format_jtbd_analysis(data):
 
     return result
 
-# Page config
+# Page configuration here
 st.set_page_config(
     page_title="Cloud Vendor Analysis RAG",
     page_icon="⭐",
@@ -96,6 +97,13 @@ set_callbacks([tracker])
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 
+# Initialize thread_id for LangGraph checkpointing
+if 'thread_id' not in st.session_state:
+    st.session_state.thread_id = str(uuid.uuid4())
+
+
+# LAYOUT GOES NEXT
+
 # Title and header
 st.title("⭐ Cloud Vendor Analysis RAG")
 st.markdown("*Analyze customer reviews of selected cloud vendors*")
@@ -107,19 +115,20 @@ if tracker.used / tracker.max_tokens > 0.9:
     st.sidebar.error("⚠️ Token limit almost reached!")
 
 # Clear conversation button
-if st.sidebar.button("🗑️ Clear Conversation", help="Start a new conversation"):
+if st.sidebar.button("🗑️ Clear Conversation"):
     st.session_state.messages = []
+    # Reset thread_id to start a new conversation in LangGraph
+    st.session_state.thread_id = str(uuid.uuid4())
     tracker.reset()
     st.rerun()
 
 st.sidebar.markdown("---")
 
-# Analysis mode - moved to top
 analysis_mode = st.sidebar.selectbox(
     "Analysis Mode",
     ["agent", "simple"],
     index=0,
-    help="agent: uses domain tools (sentiment, aspects, JTBD) for deeper analysis; simple: uses simple RAG"
+    help="agent: uses agentic RAG; simple: uses simple RAG"
 )
 
 # Only show these options in simple mode - agent decides parameters autonomously
@@ -162,7 +171,7 @@ if analysis_mode == "simple":
 
         st.caption(f"Will fetch {fetch_k} candidates and return top {top_k} diverse results")
 else:
-    # Set defaults for agent mode (agent will decide actual parameters via tools)
+    # Set default fallbacks for agent mode. Agent will decide actual parameters itself.
     selected_vendor = None
     chunk_type = "sentence"
     top_k = 12
@@ -182,7 +191,6 @@ with col1:
 
             # Show tool outputs for assistant messages
             if msg.get("tool_outputs"):
-                # tool_outputs is now a list of {"name": ..., "output": ...}
                 # Count occurrences of each tool to add index for duplicates
                 tool_counts = {}
                 for i, tool_entry in enumerate(msg["tool_outputs"]):
@@ -199,7 +207,7 @@ with col1:
                         display_name = f"{display_name} #{current_count}"
 
                     with st.expander(f"📊 {display_name}", expanded=False):
-                        # Use existing formatters
+                        # Format tool outputs nicely
                         if tool_name == "sentiment_analysis":
                             st.markdown(format_sentiment_analysis(output))
                         elif tool_name == "aspect_extraction":
@@ -238,22 +246,19 @@ with col1:
                     st.session_state.selected_question = eq
                     st.rerun()
 
+# Statistics section
 with col2:
     try:
         vector_store = get_vector_store()
+        if vector_store:
+            st.metric("Database Status", "Connected ✅")
 
-        # Get collection stats
-        st.metric("Database Status", "Connected ✅")
-
-        # Collected Reviews section
         review_stats = get_review_stats()
         if review_stats:
             total_reviews = sum(review_stats.values())
             st.metric("Total Reviews", f"{total_reviews:,}")
 
-            # Display vendor breakdown in a compact format
             for vendor, count in review_stats.items():
-                # Format vendor name nicely
                 vendor_display = vendor.replace('_', ' ').title()
                 percentage = (count / total_reviews * 100) if total_reviews > 0 else 0
                 st.markdown(f"**{vendor_display}:** {count:,} ({percentage:.1f}%)")
@@ -261,8 +266,7 @@ with col2:
     except Exception as e:
         st.error(f"Database connection issue: {str(e)}")
 
-# Chat input - placed outside columns for better layout
-# Check for selected question from example buttons
+# Check if user selected a suggested question
 if st.session_state.get('selected_question'):
     question = st.session_state.selected_question
     st.session_state.selected_question = None  # Clear after use
@@ -271,7 +275,6 @@ else:
 
 # Process chat input
 if question:
-    # Check token limit
     if tracker.is_exceeded:
         st.error("🚨 Token limit exceeded! Click 'Clear Conversation' to start fresh.")
     else:
@@ -282,13 +285,12 @@ if question:
             "timestamp": datetime.now()
         })
 
-        # Prepare parameters
+        # Sanitize vendor_param
         vendor_param = None if selected_vendor == "All" else selected_vendor
 
         # Show spinner while processing
         with st.spinner("Analyzing reviews..."):
             try:
-                # Choose analysis function based on mode
                 # Pass all messages except the one we just added (which is already in question)
                 conversation_history = st.session_state.messages[:-1]
 
@@ -349,14 +351,4 @@ if st.session_state.messages:
             mime="text/csv"
         )
 
-# Footer
 st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center; color: #666; font-size: 0.7em;'>
-    🚀 Powered by Turing College<br>
-    Mantas Levinas @ 2025
-    </div>
-    """,
-    unsafe_allow_html=True
-)
