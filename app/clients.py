@@ -56,6 +56,7 @@ def get_llm():
             model="gpt-4o-mini",
             max_retries=3,
             temperature=0.2,
+            streaming=True,
             callbacks=_callbacks
         )
     return _llm

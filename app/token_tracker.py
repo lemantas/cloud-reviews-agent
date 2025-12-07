@@ -11,7 +11,7 @@ class TokenTracker(BaseCallbackHandler):
 
     def on_llm_end(self, response, **kwargs):
         """Auto-track tokens from LLM."""
-        if hasattr(response, 'llm_output'):
+        if hasattr(response, 'llm_output') and response.llm_output is not None:
             tokens = response.llm_output.get('token_usage', {}).get('total_tokens', 0)
             st.session_state.tokens += tokens
 

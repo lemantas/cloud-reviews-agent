@@ -288,14 +288,19 @@ if question:
         # Sanitize vendor_param
         vendor_param = None if selected_vendor == "All" else selected_vendor
 
-        # Show spinner while processing
-        with st.spinner("Analyzing reviews..."):
-            try:
-                # Pass all messages except the one we just added (which is already in question)
-                conversation_history = st.session_state.messages[:-1]
+        # Pass all messages except the one we just added (which is already in question)
+        conversation_history = st.session_state.messages[:-1]
 
+        # Stream the response
+        try:
+            # Create assistant message container
+            with st.chat_message("assistant"):
+                response_placeholder = st.empty()
+                full_response = ""
+
+                # Get streaming generator
                 if analysis_mode == "agent":
-                    result = agentic_response(
+                    stream_gen = agentic_response(
                         question,
                         chunk_type,
                         vendor_param,
@@ -304,7 +309,7 @@ if question:
                         conversation_history=conversation_history
                     )
                 else:
-                    result = simple_rag_response(
+                    stream_gen = simple_rag_response(
                         question,
                         chunk_type,
                         vendor_param,
@@ -313,24 +318,39 @@ if question:
                         conversation_history=conversation_history
                     )
 
-                # Add assistant response to history
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": result["response"],
-                    "timestamp": datetime.now(),
-                    "tool_outputs": result.get("tool_outputs", {}),
-                    "snippets": result.get("snippets", [])
-                })
+                # Stream and display chunks, capturing return value
+                metadata = {"tool_outputs": [], "snippets": []}
+                try:
+                    while True:
+                        chunk = next(stream_gen)
+                        full_response += chunk
+                        response_placeholder.markdown(full_response + "▌")
+                except StopIteration as e:
+                    # Capture the return value from the generator
+                    if e.value:
+                        metadata = e.value
 
-                # Force rerun to display new messages
-                st.rerun()
+                # Remove cursor and show final response
+                response_placeholder.markdown(full_response)
 
-            except Exception as e:
-                st.error(f"Error processing your question: {str(e)}")
-                st.info("Try simplifying your question or checking your filters.")
-                # Remove the user message that caused the error
-                if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-                    st.session_state.messages.pop()
+            # Add assistant response to history
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_response,
+                "timestamp": datetime.now(),
+                "tool_outputs": metadata.get("tool_outputs", []),
+                "snippets": metadata.get("snippets", [])
+            })
+
+            # Force rerun to display new messages with tool outputs and snippets
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"Error processing your question: {str(e)}")
+            st.info("Try simplifying your question or checking your filters.")
+            # Remove the user message that caused the error
+            if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                st.session_state.messages.pop()
 
 # Download option for last assistant message with snippets
 if st.session_state.messages:
